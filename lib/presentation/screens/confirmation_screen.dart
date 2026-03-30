@@ -27,6 +27,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   bool _isLoadingOcr = true;
   bool _isSubmitting = false;
   String? _ocrError;
+  String? _croppedPath;
 
   @override
   void initState() {
@@ -37,6 +38,10 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   @override
   void dispose() {
     _valueController.dispose();
+    // Clean up temp cropped image
+    if (_croppedPath != null) {
+      try { File(_croppedPath!).delete(); } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -48,7 +53,18 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
 
     try {
       final ocrService = ref.read(ocrServiceProvider);
-      final result = await ocrService.recognizeText(widget.photoPath);
+
+      // 1. Crop to circle zone (for display and analysis)
+      if (_croppedPath == null) {
+        final cropped = await ocrService.cropToCircleZone(widget.photoPath);
+        if (mounted && cropped != null) {
+          setState(() => _croppedPath = cropped);
+        }
+      }
+
+      // 2. Analyze the cropped image (or full image as fallback)
+      final pathToAnalyze = _croppedPath ?? widget.photoPath;
+      final result = await ocrService.analyzeImage(pathToAnalyze);
       if (mounted) {
         setState(() {
           _valueController.text = result;
@@ -58,7 +74,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _ocrError = 'Error en OCR: $e';
+          _ocrError = e.toString();
           _isLoadingOcr = false;
         });
       }
@@ -193,33 +209,40 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                     ),
                   ),
                   child: Image.file(
-                    File(widget.photoPath),
+                    File(_croppedPath ?? widget.photoPath),
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.broken_image, size: 48, color: Colors.white38),
-                          SizedBox(height: 8),
-                          Text('Error al cargar imagen',
-                              style: TextStyle(color: Colors.white38)),
-                        ],
-                      ),
+                      child: Icon(Icons.broken_image, size: 48, color: Colors.white38),
                     ),
                   ),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // Retake button
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.replay_rounded, size: 18),
-                  label: const Text('Volver a Capturar'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.white54),
-                ),
+              // Action buttons row
+              Row(
+                children: [
+                  // Re-analyze button
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isLoadingOcr ? null : _runOcr,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Re-analizar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.colorScheme.secondary,
+                        side: BorderSide(color: theme.colorScheme.secondary.withValues(alpha: 0.5)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Retake button
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.replay_rounded, size: 18),
+                    label: const Text('Recapturar'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white54),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
 
@@ -236,7 +259,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                               color: theme.colorScheme.secondary, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            'Lectura Detectada (OCR)',
+                            'Lectura Detectada (Gemini AI)',
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w600,
                             ),
@@ -254,7 +277,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                                 CircularProgressIndicator(),
                                 SizedBox(height: 12),
                                 Text(
-                                  'Analizando imagen...',
+                                  'Analizando imagen con IA...',
                                   style: TextStyle(color: Colors.white54),
                                 ),
                               ],
@@ -263,8 +286,13 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                         )
                       else ...[
                         if (_ocrError != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                             child: Text(
                               _ocrError!,
                               style: const TextStyle(

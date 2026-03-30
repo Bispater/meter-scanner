@@ -39,24 +39,53 @@ class MeterOverlayPainter extends CustomPainter {
     // Draw corner brackets for visual guidance
     _drawCornerBrackets(canvas, center, circleRadius, borderPaint);
 
-    // Draw crosshair lines
-    final crosshairPaint = Paint()
-      ..color = borderColor.withValues(alpha: 0.4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
+    // Draw highlighted rectangle guide for the roller/odometer display.
+    // Positioned slightly above center where the reading display typically sits.
+    final readingRect = Rect.fromCenter(
+      center: Offset(center.dx + circleRadius * 0.05, center.dy - circleRadius * 0.28),
+      width: circleRadius * 1.10,
+      height: circleRadius * 0.28,
+    );
+    final readingRectRR = RRect.fromRectAndRadius(
+      readingRect,
+      const Radius.circular(6),
+    );
 
-    // Horizontal line
-    canvas.drawLine(
-      Offset(center.dx - circleRadius * 0.3, center.dy),
-      Offset(center.dx + circleRadius * 0.3, center.dy),
-      crosshairPaint,
-    );
-    // Vertical line
-    canvas.drawLine(
-      Offset(center.dx, center.dy - circleRadius * 0.3),
-      Offset(center.dx, center.dy + circleRadius * 0.3),
-      crosshairPaint,
-    );
+    // Semi-transparent fill so the user sees the target zone
+    final readingFillPaint = Paint()
+      ..color = const Color(0x2200BCD4);
+    canvas.drawRRect(readingRectRR, readingFillPaint);
+
+    // Bright border for the rectangle
+    final readingBorderPaint = Paint()
+      ..color = const Color(0xCC00BCD4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+    canvas.drawRRect(readingRectRR, readingBorderPaint);
+
+    // Small corner marks on the rectangle for emphasis
+    final cornerPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+    const cLen = 10.0;
+    final rl = readingRect.left;
+    final rr = readingRect.right;
+    final rt = readingRect.top;
+    final rb = readingRect.bottom;
+    // Top-left
+    canvas.drawLine(Offset(rl, rt + cLen), Offset(rl, rt), cornerPaint);
+    canvas.drawLine(Offset(rl, rt), Offset(rl + cLen, rt), cornerPaint);
+    // Top-right
+    canvas.drawLine(Offset(rr - cLen, rt), Offset(rr, rt), cornerPaint);
+    canvas.drawLine(Offset(rr, rt), Offset(rr, rt + cLen), cornerPaint);
+    // Bottom-left
+    canvas.drawLine(Offset(rl, rb - cLen), Offset(rl, rb), cornerPaint);
+    canvas.drawLine(Offset(rl, rb), Offset(rl + cLen, rb), cornerPaint);
+    // Bottom-right
+    canvas.drawLine(Offset(rr - cLen, rb), Offset(rr, rb), cornerPaint);
+    canvas.drawLine(Offset(rr, rb), Offset(rr, rb - cLen), cornerPaint);
 
     // Draw instruction text area
     _drawInstructionBackground(canvas, size, center, circleRadius);

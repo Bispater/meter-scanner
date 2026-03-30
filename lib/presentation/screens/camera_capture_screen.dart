@@ -113,9 +113,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     setState(() => _isCapturing = true);
 
     try {
-      // Turn off flash for the actual capture (use auto)
+      // Keep flash firing during capture if user enabled it
       if (_flashOn) {
-        await _cameraController!.setFlashMode(FlashMode.auto);
+        await _cameraController!.setFlashMode(FlashMode.always);
       }
 
       final XFile photo = await _cameraController!.takePicture();
@@ -252,7 +252,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
           right: 0,
           child: const Center(
             child: Text(
-              'Centre el medidor en el círculo',
+              'Alinee la lectura dentro del recuadro',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 14,

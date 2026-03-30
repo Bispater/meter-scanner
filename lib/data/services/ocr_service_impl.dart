@@ -1,126 +1,114 @@
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../../domain/services/ocr_service.dart';
 
-/// Candidate numeric text with its vertical position in the image.
-class _NumericCandidate {
-  final String text;
-  final double centerY;   // normalised 0..1 (top → bottom)
-  final double centerX;   // normalised 0..1 (left → right)
-  final double areaRatio; // bounding-box area / image area
-
-  _NumericCandidate({
-    required this.text,
-    required this.centerY,
-    required this.centerX,
-    required this.areaRatio,
-  });
-
-  /// Heuristic score – higher = more likely to be the meter reading.
-  ///
-  /// Key insights for water-meter photos:
-  /// 1. The actual reading sits in the **center** of the circular meter face,
-  ///    so prefer candidates near the vertical & horizontal center.
-  /// 2. Meter readings are typically 4–8 digits (with optional decimal).
-  /// 3. Serial / model numbers are usually at the top or bottom edge and
-  ///    often shorter (≤3 digits) or very long (>8 digits).
-  /// 4. The reading digits are physically larger on the meter so their
-  ///    bounding box covers a bigger area-ratio.
-  double get score {
-    // --- length bonus (sweet-spot 4-8 digits) ---
-    final digitCount = text.replaceAll(RegExp(r'[^0-9]'), '').length;
-    double lengthScore;
-    if (digitCount >= 4 && digitCount <= 8) {
-      lengthScore = 1.0;
-    } else if (digitCount >= 3) {
-      lengthScore = 0.6;
-    } else {
-      lengthScore = 0.2;
-    }
-
-    // --- position bonus (prefer vertical center 30-70%) ---
-    final yCenterDist = (centerY - 0.5).abs();
-    final yScore = 1.0 - (yCenterDist * 2.0).clamp(0.0, 1.0);
-
-    // --- horizontal center bonus ---
-    final xCenterDist = (centerX - 0.5).abs();
-    final xScore = 1.0 - (xCenterDist * 2.0).clamp(0.0, 1.0);
-
-    // --- area bonus (bigger bbox → bigger digits → reading) ---
-    final areaScore = (areaRatio * 50).clamp(0.0, 1.0);
-
-    return (lengthScore * 3.0) + (yScore * 2.0) + (xScore * 1.0) + (areaScore * 1.5);
-  }
-}
-
 class OcrServiceImpl implements OcrService {
-  final TextRecognizer _textRecognizer = TextRecognizer();
+  static const String _apiKey = 'AIzaSyCK39-3GKIxiDlbi5o27K6nAIDIZxCnUEI';
+
+  late final GenerativeModel _model;
+
+  static const String _prompt =
+      'Eres un sistema automatizado experto en lectura de medidores de agua. '
+      'Tu única tarea es extraer el número del consumo de agua actual. '
+      'Reglas: '
+      '1. Busca los números principales en los rodillos o diales centrales. '
+      '2. Ignora por completo cualquier número de serie impreso en la carcasa. '
+      '3. Ignora marcas de rotulador o marcador negro escritas sobre el cristal. '
+      '4. Devuelve ÚNICAMENTE los dígitos de la lectura (incluyendo ceros a la '
+      'izquierda si los hay). No agregues texto, ni explicaciones, ni unidades como m3.';
+
+  /// Matches MeterOverlayPainter circle: radius = width * 0.38 → diameter = 76%
+  static const double _circleDiameterRatio = 0.76;
+
+  OcrServiceImpl() {
+    _model = GenerativeModel(
+      model: 'gemini-2.5-flash',
+      apiKey: _apiKey,
+    );
+  }
 
   @override
   Future<String> recognizeText(String imagePath) async {
+    // Crop + analyze in one step (used when no UI preview is needed)
+    final croppedPath = await cropToCircleZone(imagePath);
+    final pathToAnalyze = croppedPath ?? imagePath;
     try {
-      final inputImage = InputImage.fromFilePath(imagePath);
-      final recognizedText = await _textRecognizer.processImage(inputImage);
-
-      // Determine image dimensions for normalisation.
-      final inputMeta = inputImage.metadata;
-      double imgW = 1.0;
-      double imgH = 1.0;
-      if (inputMeta != null) {
-        imgW = inputMeta.size.width;
-        imgH = inputMeta.size.height;
-      } else {
-        // Fallback: derive from the widest / tallest bounding box.
-        for (final block in recognizedText.blocks) {
-          final r = block.boundingBox;
-          if (r.right > imgW) imgW = r.right;
-          if (r.bottom > imgH) imgH = r.bottom;
-        }
+      return await analyzeImage(pathToAnalyze);
+    } finally {
+      // Clean up temp crop
+      if (croppedPath != null) {
+        try { await File(croppedPath).delete(); } catch (_) {}
       }
-      final imgArea = imgW * imgH;
-
-      final numericPattern = RegExp(r'[\d]+[.,]?[\d]*');
-      final candidates = <_NumericCandidate>[];
-
-      // Walk every text element (smallest granularity) for precise bbox.
-      for (final block in recognizedText.blocks) {
-        for (final line in block.lines) {
-          for (final element in line.elements) {
-            final matches = numericPattern.allMatches(element.text);
-            for (final m in matches) {
-              final txt = m.group(0) ?? '';
-              if (txt.isEmpty) continue;
-
-              final r = element.boundingBox;
-              candidates.add(_NumericCandidate(
-                text: txt,
-                centerY: (r.top + r.height / 2) / imgH,
-                centerX: (r.left + r.width / 2) / imgW,
-                areaRatio: imgArea > 0 ? (r.width * r.height) / imgArea : 0,
-              ));
-            }
-          }
-        }
-      }
-
-      if (candidates.isNotEmpty) {
-        candidates.sort((a, b) => b.score.compareTo(a.score));
-        return candidates.first.text;
-      }
-
-      // Last resort: return all recognised text so the user can pick.
-      return recognizedText.text;
-    } catch (e) {
-      // Fallback: return simulated value for MVP testing
-      return _simulateOcr();
     }
   }
 
-  String _simulateOcr() {
-    // Simulated OCR result for testing without ML Kit
-    return '00546';
+  /// Sends the image at [imagePath] directly to Gemini (no crop).
+  /// Use this when the image is already cropped.
+  Future<String> analyzeImage(String imagePath) async {
+    final Uint8List imageBytes = await File(imagePath).readAsBytes();
+
+    final content = [
+      Content.multi([
+        TextPart(_prompt),
+        DataPart('image/jpeg', imageBytes),
+      ]),
+    ];
+
+    debugPrint('[Gemini] Enviando imagen (${imageBytes.length} bytes)...');
+    final response = await _model.generateContent(content);
+    final text = response.text?.trim() ?? '';
+    debugPrint('[Gemini] Respuesta: "$text"');
+
+    if (text.isEmpty) {
+      throw Exception('Gemini devolvió respuesta vacía');
+    }
+    return text;
   }
 
-  void dispose() {
-    _textRecognizer.close();
+  /// Crop a square from the center of the image matching the overlay circle.
+  /// The circle guide has diameter = 76% of screen width; the camera preview
+  /// fills the screen width, so we crop 76% of image width as a centered square.
+  /// Returns the path to a temp JPEG, or null on failure.
+  Future<String?> cropToCircleZone(String imagePath) async {
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      final original = img.decodeImage(bytes);
+      if (original == null) return null;
+
+      final w = original.width;
+      final h = original.height;
+
+      // Square side = 76% of image width (matching the overlay circle diameter)
+      final side = (w * _circleDiameterRatio).round();
+      final x = ((w - side) / 2).round();
+      final y = ((h - side) / 2).round();
+
+      // Safety clamp
+      final clampedX = x.clamp(0, w - 1);
+      final clampedY = y.clamp(0, h - 1);
+      final clampedW = side.clamp(1, w - clampedX);
+      final clampedH = side.clamp(1, h - clampedY);
+
+      final cropped = img.copyCrop(
+        original,
+        x: clampedX,
+        y: clampedY,
+        width: clampedW,
+        height: clampedH,
+      );
+
+      final dir = await getTemporaryDirectory();
+      final outPath = p.join(dir.path, 'meter_circle_crop_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await File(outPath).writeAsBytes(img.encodeJpg(cropped, quality: 90));
+      debugPrint('[Gemini] Circle crop: ${clampedW}x$clampedH → $outPath');
+      return outPath;
+    } catch (e) {
+      debugPrint('[Gemini] Error en crop: $e');
+      return null;
+    }
   }
 }
