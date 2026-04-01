@@ -4,11 +4,13 @@ import 'camera_capture_screen.dart';
 class PrepareMeasurementScreen extends StatelessWidget {
   final String meterId;
   final String apartmentInfo;
+  final int? apartmentId;
 
   const PrepareMeasurementScreen({
     super.key,
     required this.meterId,
     required this.apartmentInfo,
+    this.apartmentId,
   });
 
   @override
@@ -128,6 +130,7 @@ class PrepareMeasurementScreen extends StatelessWidget {
                       builder: (_) => CameraCaptureScreen(
                         meterId: meterId,
                         apartmentInfo: apartmentInfo,
+                        apartmentId: apartmentId,
                       ),
                     ),
                   );

@@ -9,11 +9,13 @@ import 'confirmation_screen.dart';
 class CameraCaptureScreen extends StatefulWidget {
   final String meterId;
   final String apartmentInfo;
+  final int? apartmentId;
 
   const CameraCaptureScreen({
     super.key,
     required this.meterId,
     required this.apartmentInfo,
+    this.apartmentId,
   });
 
   @override
@@ -141,6 +143,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
           builder: (_) => ConfirmationScreen(
             meterId: widget.meterId,
             apartmentInfo: widget.apartmentInfo,
+            apartmentId: widget.apartmentId,
             photoPath: savedPath,
           ),
         ),

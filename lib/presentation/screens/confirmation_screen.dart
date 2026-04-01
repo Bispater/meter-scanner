@@ -8,12 +8,14 @@ import 'home_screen.dart';
 class ConfirmationScreen extends ConsumerStatefulWidget {
   final String meterId;
   final String apartmentInfo;
+  final int? apartmentId;
   final String photoPath;
 
   const ConfirmationScreen({
     super.key,
     required this.meterId,
     required this.apartmentInfo,
+    this.apartmentId,
     required this.photoPath,
   });
 
@@ -101,6 +103,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       final measurement = WaterMeasurement(
         meterId: widget.meterId,
         apartmentInfo: widget.apartmentInfo,
+        apartmentId: widget.apartmentId,
         value: value,
         ocrValue: _originalOcrValue,
         modifiedByUser: wasModified,

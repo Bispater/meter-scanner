@@ -1,23 +1,27 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../domain/models/qr_scan_data.dart';
+import '../providers/app_providers.dart';
 import 'prepare_measurement_screen.dart';
 
-class QrScannerScreen extends StatefulWidget {
+class QrScannerScreen extends ConsumerStatefulWidget {
   const QrScannerScreen({super.key});
 
   @override
-  State<QrScannerScreen> createState() => _QrScannerScreenState();
+  ConsumerState<QrScannerScreen> createState() => _QrScannerScreenState();
 }
 
-class _QrScannerScreenState extends State<QrScannerScreen> {
+class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
   final MobileScannerController _scannerController = MobileScannerController(
     detectionSpeed: DetectionSpeed.normal,
     facing: CameraFacing.back,
     torchEnabled: false,
   );
   bool _isProcessing = false;
+  String? _lastRejectedValue;
+  DateTime? _lastErrorTime;
 
   @override
   void dispose() {
@@ -25,56 +29,90 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     super.dispose();
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    _lastErrorTime = DateTime.now();
+    // Keep _isProcessing true for 2 seconds to prevent rapid re-scans
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _isProcessing = false);
+    });
+  }
+
   void _onDetect(BarcodeCapture capture) {
     if (_isProcessing) return;
+
+    // Cooldown: skip if last error was less than 2 seconds ago
+    if (_lastErrorTime != null &&
+        DateTime.now().difference(_lastErrorTime!).inSeconds < 2) {
+      return;
+    }
 
     final List<Barcode> barcodes = capture.barcodes;
     for (final barcode in barcodes) {
       final String? rawValue = barcode.rawValue;
       if (rawValue == null) continue;
 
+      // Skip if this is the same QR we just rejected
+      if (rawValue == _lastRejectedValue) return;
+
       setState(() => _isProcessing = true);
 
+      String? meterId;
+      String? apartmentInfo;
+      int? apartmentId;
+
       try {
-        // Try to parse as JSON: {"meter_id": "...", "apartment_info": "..."}
+        // Try to parse as JSON: {"meter_id": "...", "apartment_info": "...", "apartment_id": 1}
         final Map<String, dynamic> data = jsonDecode(rawValue);
         final qrData = QrScanData.fromJson(data);
-
-        if (qrData.meterId.isNotEmpty) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PrepareMeasurementScreen(
-                meterId: qrData.meterId,
-                apartmentInfo: qrData.apartmentInfo,
-              ),
-            ),
-          );
-          return;
-        }
+        meterId = qrData.meterId;
+        apartmentInfo = qrData.apartmentInfo;
+        apartmentId = qrData.apartmentId;
       } catch (_) {
         // If not JSON, try to parse as simple text "meter_id|apartment_info"
         final parts = rawValue.split('|');
         if (parts.length >= 2) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PrepareMeasurementScreen(
-                meterId: parts[0].trim(),
-                apartmentInfo: parts[1].trim(),
-              ),
-            ),
-          );
-          return;
+          meterId = parts[0].trim();
+          apartmentInfo = parts[1].trim();
         }
       }
 
-      setState(() => _isProcessing = false);
+      if (meterId == null || meterId.isEmpty) {
+        _lastRejectedValue = rawValue;
+        _showError('QR no válido. Debe contener meter_id y apartment_info.');
+        return;
+      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('QR no válido. Debe contener meter_id y apartment_info.'),
-          backgroundColor: Colors.red,
+      // Validate against assigned apartments
+      final authService = ref.read(authServiceProvider);
+      if (!authService.canAccessMeter(meterId)) {
+        _lastRejectedValue = rawValue;
+        _showError('Este medidor no está asignado a su cuenta.');
+        return;
+      }
+
+      // Resolve apartment_id from assigned apartments if not in QR
+      apartmentId ??= authService.getApartmentIdByMeter(meterId);
+
+      // Clear any error snackbars before navigating
+      ScaffoldMessenger.of(context).clearSnackBars();
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PrepareMeasurementScreen(
+            meterId: meterId!,
+            apartmentInfo: apartmentInfo ?? '',
+            apartmentId: apartmentId,
+          ),
         ),
       );
     }

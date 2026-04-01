@@ -71,8 +71,15 @@ class OcrServiceImpl implements OcrService {
       }
       throw Exception('Sesión expirada. Inicie sesión nuevamente.');
     } else {
-      final data = jsonDecode(response.body);
-      throw Exception(data['error'] ?? 'Error del servidor (${response.statusCode})');
+      debugPrint('[OCR] Error body: ${response.body}');
+      try {
+        final data = jsonDecode(response.body);
+        final msg = data['error'] ?? data['detail'] ?? response.body;
+        throw Exception('Error del servidor ($msg) [${response.statusCode}]');
+      } catch (e) {
+        if (e is Exception && e.toString().contains('Error del servidor')) rethrow;
+        throw Exception('Error del servidor (${response.statusCode}): ${response.body}');
+      }
     }
   }
 
