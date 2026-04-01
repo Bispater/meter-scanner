@@ -1,35 +1,22 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import '../../domain/services/ocr_service.dart';
+import 'api_config.dart';
+import 'auth_service.dart';
 
 class OcrServiceImpl implements OcrService {
-  static const String _apiKey = 'AIzaSyCK39-3GKIxiDlbi5o27K6nAIDIZxCnUEI';
-
-  late final GenerativeModel _model;
-
-  static const String _prompt =
-      'Eres un sistema automatizado experto en lectura de medidores de agua. '
-      'Tu única tarea es extraer el número del consumo de agua actual. '
-      'Reglas: '
-      '1. Busca los números principales en los rodillos o diales centrales. '
-      '2. Ignora por completo cualquier número de serie impreso en la carcasa. '
-      '3. Ignora marcas de rotulador o marcador negro escritas sobre el cristal. '
-      '4. Devuelve ÚNICAMENTE los dígitos de la lectura (incluyendo ceros a la '
-      'izquierda si los hay). No agregues texto, ni explicaciones, ni unidades como m3.';
+  final AuthService _authService;
 
   /// Matches MeterOverlayPainter circle: radius = width * 0.38 → diameter = 76%
   static const double _circleDiameterRatio = 0.76;
 
-  OcrServiceImpl() {
-    _model = GenerativeModel(
-      model: 'gemini-2.5-flash',
-      apiKey: _apiKey,
-    );
-  }
+  OcrServiceImpl({required AuthService authService})
+      : _authService = authService;
 
   @override
   Future<String> recognizeText(String imagePath) async {
@@ -46,27 +33,47 @@ class OcrServiceImpl implements OcrService {
     }
   }
 
-  /// Sends the image at [imagePath] directly to Gemini (no crop).
+  /// Sends the image at [imagePath] to the Django OCR endpoint.
   /// Use this when the image is already cropped.
   Future<String> analyzeImage(String imagePath) async {
-    final Uint8List imageBytes = await File(imagePath).readAsBytes();
+    final file = File(imagePath);
+    final bytes = await file.readAsBytes();
 
-    final content = [
-      Content.multi([
-        TextPart(_prompt),
-        DataPart('image/jpeg', imageBytes),
-      ]),
-    ];
+    debugPrint('[OCR] Enviando imagen al servidor (${bytes.length} bytes)...');
 
-    debugPrint('[Gemini] Enviando imagen (${imageBytes.length} bytes)...');
-    final response = await _model.generateContent(content);
-    final text = response.text?.trim() ?? '';
-    debugPrint('[Gemini] Respuesta: "$text"');
+    final request = http.MultipartRequest('POST', Uri.parse(ApiConfig.ocrUrl));
+    request.headers.addAll(_authService.authHeaders);
+    request.files.add(http.MultipartFile.fromBytes(
+      'photo',
+      bytes,
+      filename: 'meter_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    ));
 
-    if (text.isEmpty) {
-      throw Exception('Gemini devolvió respuesta vacía');
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+
+    debugPrint('[OCR] Response status: ${response.statusCode}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final ocrValue = data['ocr_value'] as String? ?? '';
+      debugPrint('[OCR] Valor detectado: "$ocrValue"');
+
+      if (ocrValue.isEmpty) {
+        throw Exception('El servidor devolvió respuesta vacía');
+      }
+      return ocrValue;
+    } else if (response.statusCode == 401) {
+      // Try to refresh token and retry once
+      final refreshed = await _authService.refreshAccessToken();
+      if (refreshed) {
+        return analyzeImage(imagePath);
+      }
+      throw Exception('Sesión expirada. Inicie sesión nuevamente.');
+    } else {
+      final data = jsonDecode(response.body);
+      throw Exception(data['error'] ?? 'Error del servidor (${response.statusCode})');
     }
-    return text;
   }
 
   /// Crop a square from the center of the image matching the overlay circle.
@@ -104,10 +111,10 @@ class OcrServiceImpl implements OcrService {
       final dir = await getTemporaryDirectory();
       final outPath = p.join(dir.path, 'meter_circle_crop_${DateTime.now().millisecondsSinceEpoch}.jpg');
       await File(outPath).writeAsBytes(img.encodeJpg(cropped, quality: 90));
-      debugPrint('[Gemini] Circle crop: ${clampedW}x$clampedH → $outPath');
+      debugPrint('[OCR] Circle crop: ${clampedW}x$clampedH → $outPath');
       return outPath;
     } catch (e) {
-      debugPrint('[Gemini] Error en crop: $e');
+      debugPrint('[OCR] Error en crop: $e');
       return null;
     }
   }

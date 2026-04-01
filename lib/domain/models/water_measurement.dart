@@ -1,55 +1,77 @@
 class WaterMeasurement {
-  final String id;
+  final String? id;
+  final int? apartmentId;
   final String meterId;
   final String apartmentInfo;
   final String value;
+  final String ocrValue;
+  final bool modifiedByUser;
   final String photoPath;
   final DateTime dateTime;
 
   WaterMeasurement({
-    required this.id,
+    this.id,
+    this.apartmentId,
     required this.meterId,
     required this.apartmentInfo,
     required this.value,
+    this.ocrValue = '',
+    this.modifiedByUser = false,
     required this.photoPath,
     required this.dateTime,
   });
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
+      if (id != null) 'id': id,
+      if (apartmentId != null) 'apartment': apartmentId,
+      'reading_value': value,
+      'ocr_value': ocrValue,
+      'modified_by_user': modifiedByUser,
+      'captured_at': dateTime.toIso8601String(),
       'meter_id': meterId,
       'apartment_info': apartmentInfo,
-      'value': value,
-      'photo_path': photoPath,
-      'date_time': dateTime.toIso8601String(),
     };
   }
 
   factory WaterMeasurement.fromJson(Map<String, dynamic> json) {
     return WaterMeasurement(
-      id: json['id'] as String,
-      meterId: json['meter_id'] as String,
-      apartmentInfo: json['apartment_info'] as String,
-      value: json['value'] as String,
-      photoPath: json['photo_path'] as String,
-      dateTime: DateTime.parse(json['date_time'] as String),
+      id: json['id']?.toString() ?? '',
+      apartmentId: json['apartment'] as int?,
+      meterId: json['meter_id'] as String? ?? '',
+      apartmentInfo: json['apartment_info'] as String? ??
+          json['apartment_number'] as String? ?? '',
+      value: json['reading_value']?.toString() ?? json['value'] as String? ?? '',
+      ocrValue: json['ocr_value'] as String? ?? '',
+      modifiedByUser: json['modified_by_user'] as bool? ?? false,
+      photoPath: json['photo_url'] as String? ?? json['photo_path'] as String? ?? '',
+      dateTime: json['captured_at'] != null
+          ? DateTime.parse(json['captured_at'] as String)
+          : json['date_time'] != null
+              ? DateTime.parse(json['date_time'] as String)
+              : DateTime.now(),
     );
   }
 
   WaterMeasurement copyWith({
     String? id,
+    int? apartmentId,
     String? meterId,
     String? apartmentInfo,
     String? value,
+    String? ocrValue,
+    bool? modifiedByUser,
     String? photoPath,
     DateTime? dateTime,
   }) {
     return WaterMeasurement(
       id: id ?? this.id,
+      apartmentId: apartmentId ?? this.apartmentId,
       meterId: meterId ?? this.meterId,
       apartmentInfo: apartmentInfo ?? this.apartmentInfo,
       value: value ?? this.value,
+      ocrValue: ocrValue ?? this.ocrValue,
+      modifiedByUser: modifiedByUser ?? this.modifiedByUser,
       photoPath: photoPath ?? this.photoPath,
       dateTime: dateTime ?? this.dateTime,
     );

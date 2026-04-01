@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'presentation/screens/home_screen.dart';
+import 'presentation/screens/login_screen.dart';
 import 'presentation/theme/app_theme.dart';
 
 void main() {
@@ -30,7 +30,7 @@ class HydroScanApp extends StatelessWidget {
       title: 'HydroScan Cam',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
-      home: const HomeScreen(),
+      home: const LoginScreen(),
     );
   }
 }

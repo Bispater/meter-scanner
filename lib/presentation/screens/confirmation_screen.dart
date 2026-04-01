@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'home_screen.dart';
@@ -28,6 +27,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   bool _isSubmitting = false;
   String? _ocrError;
   String? _croppedPath;
+  String _originalOcrValue = '';
 
   @override
   void initState() {
@@ -67,6 +67,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       final result = await ocrService.analyzeImage(pathToAnalyze);
       if (mounted) {
         setState(() {
+          _originalOcrValue = result;
           _valueController.text = result;
           _isLoadingOcr = false;
         });
@@ -96,11 +97,13 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      final wasModified = value != _originalOcrValue;
       final measurement = WaterMeasurement(
-        id: const Uuid().v4(),
         meterId: widget.meterId,
         apartmentInfo: widget.apartmentInfo,
         value: value,
+        ocrValue: _originalOcrValue,
+        modifiedByUser: wasModified,
         photoPath: widget.photoPath,
         dateTime: DateTime.now(),
       );
