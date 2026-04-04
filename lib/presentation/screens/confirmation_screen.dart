@@ -54,6 +54,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
     });
 
     try {
+      final connectivity = ref.read(connectivityServiceProvider);
       final ocrService = ref.read(ocrServiceProvider);
 
       // 1. Crop to circle zone (for display and analysis)
@@ -64,13 +65,31 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         }
       }
 
-      // 2. Analyze the cropped image (or full image as fallback)
+      // 2. Check connectivity before calling OCR API
+      if (!connectivity.isOnline) {
+        if (mounted) {
+          setState(() {
+            _ocrError = 'Sin conexi\u00f3n a internet. Ingrese el valor manualmente.';
+            _isLoadingOcr = false;
+          });
+        }
+        return;
+      }
+
+      // 3. Analyze the cropped image (or full image as fallback)
       final pathToAnalyze = _croppedPath ?? widget.photoPath;
       final result = await ocrService.analyzeImage(pathToAnalyze);
       if (mounted) {
         setState(() {
           _originalOcrValue = result;
           _valueController.text = result;
+          _isLoadingOcr = false;
+        });
+      }
+    } on SocketException {
+      if (mounted) {
+        setState(() {
+          _ocrError = 'Sin conexi\u00f3n a internet. Ingrese el valor manualmente.';
           _isLoadingOcr = false;
         });
       }
@@ -119,12 +138,8 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       if (success) {
         _showSuccessDialog();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error al enviar la medición. Intente nuevamente.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        // Measurement was saved locally for sync
+        _showSavedLocallyDialog();
       }
     } catch (e) {
       if (mounted) {
@@ -140,6 +155,56 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  void _showSavedLocallyDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(
+          Icons.cloud_off_rounded,
+          color: Colors.orange,
+          size: 64,
+        ),
+        title: const Text('Guardado Localmente'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Medidor: ${widget.meterId}',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            Text(
+              'Valor: ${_valueController.text} m\u00b3',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Se enviar\u00e1 autom\u00e1ticamente\ncuando se recupere la conexi\u00f3n.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const HomeScreen()),
+                (route) => false,
+              );
+            },
+            child: const Text('Volver al Inicio'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSuccessDialog() {

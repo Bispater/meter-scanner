@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'presentation/providers/app_providers.dart';
 import 'presentation/screens/login_screen.dart';
 import 'presentation/theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   SystemChrome.setPreferredOrientations([
@@ -18,7 +19,22 @@ void main() {
     ),
   );
 
-  runApp(const ProviderScope(child: HydroScanApp()));
+  final container = ProviderContainer();
+
+  // Initialize connectivity monitoring
+  final connectivity = container.read(connectivityServiceProvider);
+  await connectivity.init();
+
+  // Initialize sync service (auto-syncs when online)
+  final syncService = container.read(syncServiceProvider);
+  await syncService.init();
+
+  runApp(
+    UncontrolledProviderScope(
+      container: container,
+      child: const HydroScanApp(),
+    ),
+  );
 }
 
 class HydroScanApp extends StatelessWidget {

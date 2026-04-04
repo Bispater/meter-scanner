@@ -1,9 +1,55 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/app_providers.dart';
 import 'qr_scanner_screen.dart';
 import 'prepare_measurement_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  int _pendingCount = 0;
+  bool _isOnline = true;
+  bool _isSyncing = false;
+  StreamSubscription<int>? _pendingSub;
+  StreamSubscription<bool>? _connectivitySub;
+
+  @override
+  void initState() {
+    super.initState();
+    final syncService = ref.read(syncServiceProvider);
+    final connectivity = ref.read(connectivityServiceProvider);
+
+    _pendingCount = syncService.pendingCount;
+    _isOnline = connectivity.isOnline;
+
+    _pendingSub = syncService.pendingCountStream.listen((count) {
+      if (mounted) setState(() => _pendingCount = count);
+    });
+
+    _connectivitySub = connectivity.onConnectivityChanged.listen((online) {
+      if (mounted) setState(() => _isOnline = online);
+    });
+  }
+
+  @override
+  void dispose() {
+    _pendingSub?.cancel();
+    _connectivitySub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _manualSync() async {
+    setState(() => _isSyncing = true);
+    final syncService = ref.read(syncServiceProvider);
+    await syncService.syncAll();
+    if (mounted) setState(() => _isSyncing = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,6 +61,63 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Offline banner
+                if (!_isOnline)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.wifi_off_rounded, color: Colors.orange, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Sin conexión a internet',
+                          style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Pending sync banner
+                if (_pendingCount > 0)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.cyan.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.cyan.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.cloud_sync_rounded, color: Colors.cyan, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$_pendingCount medición${_pendingCount == 1 ? '' : 'es'} pendiente${_pendingCount == 1 ? '' : 's'}',
+                          style: const TextStyle(color: Colors.cyan, fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        if (_isOnline) ...[
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: _isSyncing ? null : _manualSync,
+                            child: _isSyncing
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyan))
+                                : const Icon(Icons.sync_rounded, color: Colors.cyan, size: 20),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
                 // App icon
                 Container(
                   width: 120,
