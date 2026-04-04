@@ -112,26 +112,18 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       );
 
       final repository = ref.read(measurementRepositoryProvider);
-      final success = await repository.submitMeasurement(measurement);
+      await repository.submitMeasurement(measurement);
 
       if (!mounted) return;
-
-      if (success) {
-        _showSuccessDialog();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error al enviar la medición. Intente nuevamente.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showSuccessDialog();
     } catch (e) {
       if (mounted) {
+        final message = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text(message),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
           ),
         );
       }

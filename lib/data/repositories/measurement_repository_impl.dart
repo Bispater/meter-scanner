@@ -55,14 +55,42 @@ class MeasurementRepositoryImpl implements MeasurementRepository {
         if (refreshed) {
           return submitMeasurement(measurement);
         }
+        throw Exception('Su sesión ha expirado. Por favor inicie sesión nuevamente.');
       }
 
       debugPrint('[API] Submit error: ${response.body}');
-      return false;
+      throw Exception(_parseApiError(response.body));
     } catch (e) {
       debugPrint('[API] Submit exception: $e');
-      return false;
+      rethrow;
     }
+  }
+
+  /// Extracts the first human-readable error message from a DRF error response body.
+  String _parseApiError(String body) {
+    if (body.isEmpty) return 'Error al enviar la medición. Intente nuevamente.';
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        for (final value in decoded.values) {
+          if (value is List && value.isNotEmpty) {
+            final first = value.first;
+            if (first is Map && first.containsKey('message')) return first['message'].toString();
+            return first.toString();
+          }
+          if (value is String) return value;
+          if (value is Map) {
+            for (final inner in value.values) {
+              if (inner is List && inner.isNotEmpty) return inner.first.toString();
+              if (inner is String) return inner;
+            }
+          }
+        }
+        return decoded.toString();
+      }
+      if (decoded is List && decoded.isNotEmpty) return decoded.first.toString();
+    } catch (_) {}
+    return body.length > 200 ? 'Error al enviar la medición. Intente nuevamente.' : body;
   }
 
   @override

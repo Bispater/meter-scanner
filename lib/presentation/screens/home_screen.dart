@@ -1,101 +1,233 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/services/auth_service.dart';
+import '../../domain/models/water_measurement.dart';
+import '../providers/app_providers.dart';
 import 'qr_scanner_screen.dart';
 import 'prepare_measurement_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+// ── Provider that fetches recent measurements ──────────────────────────────
+final recentMeasurementsProvider = FutureProvider<List<WaterMeasurement>>((ref) async {
+  final repo = ref.read(measurementRepositoryProvider);
+  return repo.getRecentMeasurements();
+});
+
+// ── Home screen ────────────────────────────────────────────────────────────
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _refreshing = false;
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    final auth = ref.read(authServiceProvider);
+    await auth.refreshProfile();
+    ref.invalidate(recentMeasurementsProvider);
+    if (mounted) setState(() => _refreshing = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final auth = ref.watch(authServiceProvider);
+    final recentAsync = ref.watch(recentMeasurementsProvider);
+    final cycles = auth.activeCycles;
+    final name = auth.displayName ?? 'Operador';
+
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // App icon
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .secondary
-                        .withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.water_drop_rounded,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Title
-                Text(
-                  'HydroScan Cam',
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          color: Theme.of(context).colorScheme.secondary,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              // ── App bar ──────────────────────────────────────────────
+              SliverAppBar(
+                floating: true,
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                title: Row(
+                  children: [
+                    Icon(
+                      Icons.water_drop_rounded,
+                      color: Theme.of(context).colorScheme.secondary,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'HydroScan',
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-
-                // Subtitle
-                Text(
-                  'Lectura rápida y precisa de\nmedidores de agua',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Colors.white60,
-                        height: 1.5,
+                actions: [
+                  if (_refreshing)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                ),
-                const SizedBox(height: 64),
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.refresh, color: Colors.white54),
+                      onPressed: _refresh,
+                      tooltip: 'Actualizar',
+                    ),
+                ],
+              ),
 
-                // Scan QR button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const QrScannerScreen(),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    // ── Greeting ──────────────────────────────────────
+                    Text(
+                      'Hola, $name',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _greetingSubtitle(cycles),
+                      style: const TextStyle(color: Colors.white54, fontSize: 13),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Scan button ────────────────────────────────────
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const QrScannerScreen()),
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 28),
-                    label: const Text('Escanear QR'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Manual entry option
-                TextButton(
-                  onPressed: () {
-                    _showManualEntryDialog(context);
-                  },
-                  child: const Text(
-                    'Ingreso manual',
-                    style: TextStyle(color: Colors.white54),
-                  ),
-                ),
-
-                const SizedBox(height: 48),
-
-                // Version info
-                Text(
-                  'v1.0.0 — MVP',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white24,
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 26),
+                        label: const Text('Escanear Medidor'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton(
+                        onPressed: () => _showManualEntryDialog(context),
+                        child: const Text(
+                          'Ingreso manual',
+                          style: TextStyle(color: Colors.white38, fontSize: 13),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+
+                    // ── Active cycles ──────────────────────────────────
+                    if (cycles.isNotEmpty) ...[
+                      _sectionTitle('Ciclos Activos', Icons.event_repeat),
+                      const SizedBox(height: 10),
+                      ...cycles.map((c) => _CycleCard(
+                            cycle: c,
+                            onTapPending: (apt) => _navigateToMeter(context, apt),
+                          )),
+                      const SizedBox(height: 28),
+                    ],
+
+                    // ── Recent measurements ────────────────────────────
+                    _sectionTitle('Mis Mediciones Recientes', Icons.history),
+                    const SizedBox(height: 10),
+                    recentAsync.when(
+                      loading: () => const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                      error: (_, __) => _emptyCard('No se pudieron cargar las mediciones.'),
+                      data: (list) {
+                        if (list.isEmpty) {
+                          return _emptyCard('Aún no tienes mediciones registradas.');
+                        }
+                        final sorted = [...list]
+                          ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+                        return Column(
+                          children: sorted
+                              .take(20)
+                              .map((m) => _MeasurementTile(measurement: m))
+                              .toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 32),
+                  ]),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _greetingSubtitle(List<CycleInfo> cycles) {
+    if (cycles.isEmpty) return 'No hay ciclos activos en este momento.';
+    final total = cycles.fold<int>(0, (s, c) => s + c.pendingCount);
+    if (total == 0) return '¡Todo al día! No tienes mediciones pendientes.';
+    return '$total medición${total != 1 ? 'es' : ''} pendiente${total != 1 ? 's' : ''} en ${cycles.length} ciclo${cycles.length != 1 ? 's' : ''}.';
+  }
+
+  Widget _sectionTitle(String title, IconData icon) => Row(
+        children: [
+          Icon(icon, size: 18, color: Theme.of(context).colorScheme.secondary),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
           ),
+        ],
+      );
+
+  Widget _emptyCard(String message) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            message,
+            style: const TextStyle(color: Colors.white38, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+
+  void _navigateToMeter(BuildContext context, CyclePendingApartment apt) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PrepareMeasurementScreen(
+          meterId: apt.meterId,
+          apartmentInfo: apt.apartmentInfo,
+          apartmentId: apt.id,
         ),
       ),
     );
@@ -124,7 +256,7 @@ class HomeScreen extends StatelessWidget {
               controller: apartmentController,
               decoration: const InputDecoration(
                 labelText: 'Departamento',
-                hintText: 'Ej: 4B - Piso 2',
+                hintText: 'Ej: Torre A — Depto 4B',
               ),
             ),
           ],
@@ -155,6 +287,334 @@ class HomeScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ── Cycle card widget ───────────────────────────────────────────────────────
+class _CycleCard extends StatefulWidget {
+  final CycleInfo cycle;
+  final void Function(CyclePendingApartment) onTapPending;
+
+  const _CycleCard({required this.cycle, required this.onTapPending});
+
+  @override
+  State<_CycleCard> createState() => _CycleCardState();
+}
+
+class _CycleCardState extends State<_CycleCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.cycle;
+    final pct = c.progressPct;
+    final color = pct >= 1.0 ? Colors.green : Theme.of(context).colorScheme.secondary;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row
+          InkWell(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          c.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      _StatusChip(status: c.status),
+                      const SizedBox(width: 6),
+                      Icon(
+                        _expanded ? Icons.expand_less : Icons.expand_more,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${c.buildingName} · Límite: ${c.deadline}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                  const SizedBox(height: 10),
+                  // Progress bar
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: pct,
+                            backgroundColor: Colors.white12,
+                            valueColor: AlwaysStoppedAnimation<Color>(color),
+                            minHeight: 6,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '${c.measuredCount}/${c.totalAssigned}',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (c.pendingCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '${c.pendingCount} departamento${c.pendingCount != 1 ? 's' : ''} pendiente${c.pendingCount != 1 ? 's' : ''}',
+                        style: TextStyle(
+                          color: Colors.amber.shade300,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+
+          // Expandable pending list
+          if (_expanded && c.pendingApartments.isNotEmpty)
+            Column(
+              children: [
+                const Divider(color: Colors.white10, height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.pending_actions, size: 14, color: Colors.amber.shade300),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Pendientes',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.amber.shade300,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ...c.pendingApartments.map(
+                  (apt) => InkWell(
+                    onTap: () => widget.onTapPending(apt),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Text(
+                                apt.number,
+                                style: TextStyle(
+                                  color: Colors.amber.shade300,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  apt.apartmentInfo,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  apt.meterId,
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.qr_code_scanner,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.secondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          if (_expanded && c.pendingApartments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, size: 16, color: Colors.green.shade400),
+                  const SizedBox(width: 6),
+                  Text(
+                    '¡Todas las mediciones completadas!',
+                    style: TextStyle(color: Colors.green.shade400, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Status chip ─────────────────────────────────────────────────────────────
+class _StatusChip extends StatelessWidget {
+  final String status;
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (status) {
+      'in_progress' => ('En Curso', Colors.cyan),
+      'pending' => ('Pendiente', Colors.amber),
+      'completed' => ('Completado', Colors.green),
+      _ => ('Cerrado', Colors.grey),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Recent measurement tile ─────────────────────────────────────────────────
+class _MeasurementTile extends StatelessWidget {
+  final WaterMeasurement measurement;
+  const _MeasurementTile({required this.measurement});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.secondary;
+    final dateStr = _formatDate(measurement.dateTime);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.speed, color: accent, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  measurement.apartmentInfo,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  measurement.meterId,
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${measurement.value} m³',
+                style: TextStyle(
+                  color: accent,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              Text(
+                dateStr,
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) {
+      return 'Hoy ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } else if (diff.inDays == 1) {
+      return 'Ayer';
+    }
+    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   }
 }
 
