@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hydroscan_cam/domain/models/water_measurement.dart';
-import 'package:hydroscan_cam/domain/models/qr_scan_data.dart';
+import 'package:metscan_app/domain/models/water_measurement.dart';
+import 'package:metscan_app/domain/models/qr_scan_data.dart';
 
 void main() {
   group('WaterMeasurement', () {
