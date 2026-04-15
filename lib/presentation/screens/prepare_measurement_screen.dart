@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
+import '../../domain/models/meter_reading_layout.dart';
 import 'camera_capture_screen.dart';
 
 class PrepareMeasurementScreen extends StatelessWidget {
   final String meterId;
   final String apartmentInfo;
   final int? apartmentId;
+  final String meterReadingLayout;
 
   const PrepareMeasurementScreen({
     super.key,
     required this.meterId,
     required this.apartmentInfo,
     this.apartmentId,
+    this.meterReadingLayout = meterLayoutA,
   });
 
   @override
@@ -131,6 +134,7 @@ class PrepareMeasurementScreen extends StatelessWidget {
                         meterId: meterId,
                         apartmentInfo: apartmentInfo,
                         apartmentId: apartmentId,
+                        meterReadingLayout: meterReadingLayout,
                       ),
                     ),
                   );

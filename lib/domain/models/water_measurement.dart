@@ -76,4 +76,14 @@ class WaterMeasurement {
       dateTime: dateTime ?? this.dateTime,
     );
   }
+
+  /// Display helper for meter-style reading: 00546,1188
+  String get formattedMeterValue {
+    final digits = value.replaceAll(RegExp(r'[^0-9Xx]'), '').toUpperCase();
+    if (digits.isEmpty) return value;
+    final right = digits.length >= 4 ? digits.substring(digits.length - 4) : digits.padLeft(4, '0');
+    final leftRaw = digits.length > 4 ? digits.substring(0, digits.length - 4) : '';
+    final left = leftRaw.padLeft(5, '0');
+    return '$left,$right';
+  }
 }

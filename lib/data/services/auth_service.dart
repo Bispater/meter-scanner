@@ -1,33 +1,42 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../../domain/models/meter_reading_layout.dart';
 import 'api_config.dart';
 
 class AssignedApartment {
   final int id;
   final String meterId;
+  final String qrCode;
   final String number;
   final String towerName;
   final String buildingName;
   final String apartmentInfo;
+  final String readingLayout;
 
   AssignedApartment({
     required this.id,
     required this.meterId,
+    required this.qrCode,
     required this.number,
     required this.towerName,
     required this.buildingName,
     required this.apartmentInfo,
+    this.readingLayout = meterLayoutA,
   });
 
   factory AssignedApartment.fromJson(Map<String, dynamic> json) {
+    final meterId = json['meter_id'] as String? ?? '';
+    final qrCode = json['qr_code'] as String? ?? '';
     return AssignedApartment(
       id: json['id'] as int,
-      meterId: json['meter_id'] as String? ?? '',
+      meterId: meterId,
+      qrCode: qrCode.isNotEmpty ? qrCode : meterId,
       number: json['number'] as String? ?? '',
       towerName: json['tower_name'] as String? ?? '',
       buildingName: json['building_name'] as String? ?? '',
       apartmentInfo: json['apartment_info'] as String? ?? '',
+      readingLayout: normalizeMeterReadingLayout(json['reading_layout'] as String?),
     );
   }
 }
@@ -35,32 +44,41 @@ class AssignedApartment {
 class CyclePendingApartment {
   final int id;
   final String meterId;
+  final String qrCode;
   final String number;
   final int floor;
   final String towerName;
   final String buildingName;
   final String apartmentInfo;
+  final String readingLayout;
 
   CyclePendingApartment({
     required this.id,
     required this.meterId,
+    required this.qrCode,
     required this.number,
     required this.floor,
     required this.towerName,
     required this.buildingName,
     required this.apartmentInfo,
+    this.readingLayout = meterLayoutA,
   });
 
-  factory CyclePendingApartment.fromJson(Map<String, dynamic> json) =>
-      CyclePendingApartment(
-        id: json['id'] as int,
-        meterId: json['meter_id'] as String? ?? '',
-        number: json['number'] as String? ?? '',
-        floor: json['floor'] as int? ?? 0,
-        towerName: json['tower_name'] as String? ?? '',
-        buildingName: json['building_name'] as String? ?? '',
-        apartmentInfo: json['apartment_info'] as String? ?? '',
-      );
+  factory CyclePendingApartment.fromJson(Map<String, dynamic> json) {
+    final meterId = json['meter_id'] as String? ?? '';
+    final qrCode = json['qr_code'] as String? ?? '';
+    return CyclePendingApartment(
+      id: json['id'] as int,
+      meterId: meterId,
+      qrCode: qrCode.isNotEmpty ? qrCode : meterId,
+      number: json['number'] as String? ?? '',
+      floor: json['floor'] as int? ?? 0,
+      towerName: json['tower_name'] as String? ?? '',
+      buildingName: json['building_name'] as String? ?? '',
+      apartmentInfo: json['apartment_info'] as String? ?? '',
+      readingLayout: normalizeMeterReadingLayout(json['reading_layout'] as String?),
+    );
+  }
 }
 
 class CycleInfo {
@@ -139,22 +157,41 @@ class AuthService {
         if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
       };
 
-  /// Check if a meter_id is assigned to this operator.
-  /// Admins can scan any meter.
-  bool canAccessMeter(String meterId) {
+  /// Check if a qr_code is assigned to this operator.
+  /// Falls back to meter_id check for backward compat.
+  /// Admins can scan any code.
+  bool canAccessByQrCode(String code) {
     if (_userRole == 'admin') return true;
-    if (_assignedApartments.isEmpty) return true; // no restrictions if none assigned
-    return _assignedApartments.any((a) => a.meterId == meterId);
+    if (_assignedApartments.isEmpty) return true;
+    return _assignedApartments.any((a) => a.qrCode == code || a.meterId == code);
   }
 
-  /// Get the apartment_id for a given meter_id (null if not found).
-  int? getApartmentIdByMeter(String meterId) {
+  /// Get the apartment_id for a given qr_code or meter_id (null if not found).
+  int? getApartmentIdByQrCode(String code) {
     try {
       return _assignedApartments
-          .firstWhere((a) => a.meterId == meterId)
+          .firstWhere((a) => a.qrCode == code || a.meterId == code)
           .id;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Legacy: Check if a meter_id is assigned to this operator.
+  bool canAccessMeter(String meterId) => canAccessByQrCode(meterId);
+
+  /// Legacy: Get the apartment_id for a given meter_id.
+  int? getApartmentIdByMeter(String meterId) => getApartmentIdByQrCode(meterId);
+
+  /// [reading_layout] A/B for the assigned apartment matching [code] (qr_code or meter_id).
+  String getReadingLayoutForQrOrMeter(String code) {
+    try {
+      final a = _assignedApartments.firstWhere(
+        (x) => x.qrCode == code || x.meterId == code,
+      );
+      return normalizeMeterReadingLayout(a.readingLayout);
+    } catch (_) {
+      return meterLayoutA;
     }
   }
 

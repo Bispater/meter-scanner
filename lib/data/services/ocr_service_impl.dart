@@ -19,12 +19,12 @@ class OcrServiceImpl implements OcrService {
       : _authService = authService;
 
   @override
-  Future<String> recognizeText(String imagePath) async {
+  Future<String> recognizeText(String imagePath, {String meterReadingType = 'A'}) async {
     // Crop + analyze in one step (used when no UI preview is needed)
     final croppedPath = await cropToCircleZone(imagePath);
     final pathToAnalyze = croppedPath ?? imagePath;
     try {
-      return await analyzeImage(pathToAnalyze);
+      return await analyzeImage(pathToAnalyze, meterReadingType: meterReadingType);
     } finally {
       // Clean up temp crop
       if (croppedPath != null) {
@@ -35,7 +35,8 @@ class OcrServiceImpl implements OcrService {
 
   /// Sends the image at [imagePath] to the Django OCR endpoint.
   /// Use this when the image is already cropped.
-  Future<String> analyzeImage(String imagePath) async {
+  @override
+  Future<String> analyzeImage(String imagePath, {String meterReadingType = 'A'}) async {
     final file = File(imagePath);
     final bytes = await file.readAsBytes();
 
@@ -43,6 +44,8 @@ class OcrServiceImpl implements OcrService {
 
     final request = http.MultipartRequest('POST', Uri.parse(ApiConfig.ocrUrl));
     request.headers.addAll(_authService.authHeaders);
+    request.fields['meter_reading_type'] =
+        meterReadingType == 'B' ? 'B' : 'A';
     request.files.add(http.MultipartFile.fromBytes(
       'photo',
       bytes,
@@ -67,7 +70,7 @@ class OcrServiceImpl implements OcrService {
       // Try to refresh token and retry once
       final refreshed = await _authService.refreshAccessToken();
       if (refreshed) {
-        return analyzeImage(imagePath);
+        return analyzeImage(imagePath, meterReadingType: meterReadingType);
       }
       throw Exception('Sesión expirada. Inicie sesión nuevamente.');
     } else {
@@ -87,6 +90,7 @@ class OcrServiceImpl implements OcrService {
   /// The circle guide has diameter = 76% of screen width; the camera preview
   /// fills the screen width, so we crop 76% of image width as a centered square.
   /// Returns the path to a temp JPEG, or null on failure.
+  @override
   Future<String?> cropToCircleZone(String imagePath) async {
     try {
       final bytes = await File(imagePath).readAsBytes();

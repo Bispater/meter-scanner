@@ -228,6 +228,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           meterId: apt.meterId,
           apartmentInfo: apt.apartmentInfo,
           apartmentId: apt.id,
+          meterReadingLayout: apt.readingLayout,
         ),
       ),
     );
@@ -270,13 +271,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () {
               if (meterIdController.text.isNotEmpty &&
                   apartmentController.text.isNotEmpty) {
+                final auth = ref.read(authServiceProvider);
+                final layout = auth.getReadingLayoutForQrOrMeter(
+                  meterIdController.text.trim(),
+                );
                 Navigator.pop(ctx);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => PrepareMeasurementScreen(
-                      meterId: meterIdController.text,
+                      meterId: meterIdController.text.trim(),
                       apartmentInfo: apartmentController.text,
+                      meterReadingLayout: layout,
                     ),
                   ),
                 );
@@ -588,7 +594,7 @@ class _MeasurementTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${measurement.value} m³',
+                '${measurement.formattedMeterValue} m³',
                 style: TextStyle(
                   color: accent,
                   fontWeight: FontWeight.bold,

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../domain/models/meter_reading_layout.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'home_screen.dart';
@@ -10,6 +12,7 @@ class ConfirmationScreen extends ConsumerStatefulWidget {
   final String apartmentInfo;
   final int? apartmentId;
   final String photoPath;
+  final String meterReadingLayout;
 
   const ConfirmationScreen({
     super.key,
@@ -17,6 +20,7 @@ class ConfirmationScreen extends ConsumerStatefulWidget {
     required this.apartmentInfo,
     this.apartmentId,
     required this.photoPath,
+    this.meterReadingLayout = meterLayoutA,
   });
 
   @override
@@ -25,6 +29,8 @@ class ConfirmationScreen extends ConsumerStatefulWidget {
 
 class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   final TextEditingController _valueController = TextEditingController();
+  final TextEditingController _wholePartController = TextEditingController();
+  final TextEditingController _decimalPartController = TextEditingController();
   bool _isLoadingOcr = true;
   bool _isSubmitting = false;
   String? _ocrError;
@@ -40,6 +46,8 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   @override
   void dispose() {
     _valueController.dispose();
+    _wholePartController.dispose();
+    _decimalPartController.dispose();
     // Clean up temp cropped image
     if (_croppedPath != null) {
       try { File(_croppedPath!).delete(); } catch (_) {}
@@ -66,11 +74,15 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
 
       // 2. Analyze the cropped image (or full image as fallback)
       final pathToAnalyze = _croppedPath ?? widget.photoPath;
-      final result = await ocrService.analyzeImage(pathToAnalyze);
+      final result = await ocrService.analyzeImage(
+        pathToAnalyze,
+        meterReadingType: widget.meterReadingLayout == meterLayoutB ? 'B' : 'A',
+      );
       if (mounted) {
+        final normalized = _normalizeReading(result);
         setState(() {
-          _originalOcrValue = result;
-          _valueController.text = result;
+          _originalOcrValue = normalized;
+          _setReadingFromRaw(normalized);
           _isLoadingOcr = false;
         });
       }
@@ -85,11 +97,20 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   }
 
   Future<void> _submitMeasurement() async {
-    final value = _valueController.text.trim();
+    final value = _normalizeReading(_valueController.text.trim());
     if (value.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Ingrese un valor de lectura'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (value.length != 9) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La lectura debe tener 9 dígitos (5 enteros + 4 decimales/esferas).'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -134,6 +155,58 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
     }
   }
 
+  String _normalizeReading(String raw) {
+    final upper = raw.toUpperCase();
+    final cleaned = upper.replaceAll(RegExp(r'[^0-9X]'), '');
+    return cleaned.length > 9 ? cleaned.substring(0, 9) : cleaned;
+  }
+
+  String _formatMeterReading(String raw) {
+    final normalized = _normalizeReading(raw);
+    if (normalized.isEmpty) return raw;
+    final right = normalized.length >= 4
+        ? normalized.substring(normalized.length - 4)
+        : normalized.padLeft(4, '0');
+    final leftRaw = normalized.length > 4
+        ? normalized.substring(0, normalized.length - 4)
+        : '';
+    final left = leftRaw.padLeft(5, '0');
+    return '$left,$right';
+  }
+
+  void _setReadingFromRaw(String raw) {
+    final normalized = _normalizeReading(raw);
+    _valueController.text = normalized;
+    final whole = normalized.length <= 5 ? normalized : normalized.substring(0, 5);
+    final decimal = normalized.length <= 5 ? '' : normalized.substring(5);
+    _wholePartController.text = whole;
+    _decimalPartController.text = decimal;
+  }
+
+  void _onWholeChanged(String value) {
+    final sanitized = _normalizeReading(value);
+    if (sanitized != value) {
+      _wholePartController.value = TextEditingValue(
+        text: sanitized,
+        selection: TextSelection.collapsed(offset: sanitized.length),
+      );
+    }
+    final combined = _normalizeReading('${_wholePartController.text}${_decimalPartController.text}');
+    _setReadingFromRaw(combined);
+  }
+
+  void _onDecimalChanged(String value) {
+    final sanitized = _normalizeReading(value);
+    if (sanitized != value) {
+      _decimalPartController.value = TextEditingValue(
+        text: sanitized,
+        selection: TextSelection.collapsed(offset: sanitized.length),
+      );
+    }
+    final combined = _normalizeReading('${_wholePartController.text}${_decimalPartController.text}');
+    _setReadingFromRaw(combined);
+  }
+
   void _showSuccessDialog() {
     showDialog(
       context: context,
@@ -153,7 +226,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
               style: const TextStyle(color: Colors.white70),
             ),
             Text(
-              'Valor: ${_valueController.text} m³',
+              'Valor: ${_formatMeterReading(_valueController.text)} m³',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -319,10 +392,69 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                               fontWeight: FontWeight.w600,
                             ),
                             helperText:
-                                'Verifique y corrija el valor si es necesario',
+                                'Formato esperado: 9 dígitos (5 enteros + 4 decimales/esferas)',
                             helperStyle:
                                 const TextStyle(color: Colors.white38),
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'Formato medidor: ${_formatMeterReading(_valueController.text)}',
+                            style: TextStyle(
+                              color: theme.colorScheme.secondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _wholePartController,
+                                onChanged: _onWholeChanged,
+                                maxLength: 5,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
+                                ],
+                                decoration: const InputDecoration(
+                                  labelText: 'Enteros (5)',
+                                  counterText: '',
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 2,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: _decimalPartController,
+                                onChanged: _onDecimalChanged,
+                                maxLength: 4,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
+                                ],
+                                decoration: const InputDecoration(
+                                  labelText: 'Esferas/decimales (4)',
+                                  counterText: '',
+                                ),
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 2,
+                                  color: theme.colorScheme.secondary,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import '../../domain/models/meter_reading_layout.dart';
 import '../../domain/models/qr_scan_data.dart';
 import '../providers/app_providers.dart';
 import 'prepare_measurement_screen.dart';
@@ -65,42 +66,54 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
 
       setState(() => _isProcessing = true);
 
-      String? meterId;
-      String? apartmentInfo;
+      String qrCode = '';
+      String apartmentInfo = '';
       int? apartmentId;
+      String meterReadingLayout = meterLayoutA;
+      var parsedJsonQr = false;
 
       try {
-        // Try to parse as JSON: {"meter_id": "...", "apartment_info": "...", "apartment_id": 1}
+        // Try to parse as JSON: {"qr_code": "1409A", "apartment_info": "...", "apartment_id": 1}
+        // Also supports legacy format with "meter_id" key
         final Map<String, dynamic> data = jsonDecode(rawValue);
         final qrData = QrScanData.fromJson(data);
-        meterId = qrData.meterId;
-        apartmentInfo = qrData.apartmentInfo;
+        parsedJsonQr = true;
+        qrCode = qrData.qrCode;
+        apartmentInfo = qrData.apartmentInfo.isNotEmpty ? qrData.apartmentInfo : '';
         apartmentId = qrData.apartmentId;
+        meterReadingLayout = qrData.meterType;
       } catch (_) {
-        // If not JSON, try to parse as simple text "meter_id|apartment_info"
+        // Plain text: either "1409A" or legacy "meter_id|apartment_info"
         final parts = rawValue.split('|');
         if (parts.length >= 2) {
-          meterId = parts[0].trim();
+          qrCode = parts[0].trim();
           apartmentInfo = parts[1].trim();
+        } else {
+          qrCode = rawValue.trim();
         }
       }
 
-      if (meterId == null || meterId.isEmpty) {
+      if (qrCode.isEmpty) {
         _lastRejectedValue = rawValue;
-        _showError('QR no válido. Debe contener meter_id y apartment_info.');
+        _showError('QR no válido. No se pudo leer el código del departamento.');
         return;
       }
 
       // Validate against assigned apartments
       final authService = ref.read(authServiceProvider);
-      if (!authService.canAccessMeter(meterId)) {
+      if (!authService.canAccessByQrCode(qrCode)) {
         _lastRejectedValue = rawValue;
-        _showError('Este medidor no está asignado a su cuenta.');
+        _showError('Este departamento no está asignado a su cuenta.');
         return;
       }
 
       // Resolve apartment_id from assigned apartments if not in QR
-      apartmentId ??= authService.getApartmentIdByMeter(meterId);
+      apartmentId ??= authService.getApartmentIdByQrCode(qrCode);
+
+      // QR sin JSON: tomar tipo desde asignación en /me
+      if (!parsedJsonQr) {
+        meterReadingLayout = authService.getReadingLayoutForQrOrMeter(qrCode);
+      }
 
       // Clear any error snackbars before navigating
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -109,9 +122,10 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => PrepareMeasurementScreen(
-            meterId: meterId!,
-            apartmentInfo: apartmentInfo ?? '',
+            meterId: qrCode,
+            apartmentInfo: apartmentInfo,
             apartmentId: apartmentId,
+            meterReadingLayout: meterReadingLayout,
           ),
         ),
       );

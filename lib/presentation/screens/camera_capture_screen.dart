@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import '../../domain/models/meter_reading_layout.dart';
 import '../widgets/meter_overlay_painter.dart';
 import 'confirmation_screen.dart';
 
@@ -10,12 +11,14 @@ class CameraCaptureScreen extends StatefulWidget {
   final String meterId;
   final String apartmentInfo;
   final int? apartmentId;
+  final String meterReadingLayout;
 
   const CameraCaptureScreen({
     super.key,
     required this.meterId,
     required this.apartmentInfo,
     this.apartmentId,
+    this.meterReadingLayout = meterLayoutA,
   });
 
   @override
@@ -145,6 +148,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
             apartmentInfo: widget.apartmentInfo,
             apartmentId: widget.apartmentId,
             photoPath: savedPath,
+            meterReadingLayout: widget.meterReadingLayout,
           ),
         ),
       );
@@ -236,6 +240,46 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
           child: AspectRatio(
             aspectRatio: 1 / _cameraController!.value.aspectRatio,
             child: CameraPreview(_cameraController!),
+          ),
+        ),
+
+        // Silueta de referencia (Tipo A / B) — mismo tamaño que recorte OCR (76% ancho)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Builder(
+              builder: (context) {
+                final w = MediaQuery.sizeOf(context).width;
+                final side = w * 0.76;
+                return Center(
+                  child: SizedBox(
+                    width: side,
+                    height: side,
+                    child: Opacity(
+                      opacity: 0.4,
+                      child: Image.asset(
+                        widget.meterReadingLayout == meterLayoutB
+                            ? 'assets/meter-types/type_B.png'
+                            : 'assets/meter-types/type_A.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Text(
+                            widget.meterReadingLayout == meterLayoutB
+                                ? 'Tipo B'
+                                : 'Tipo A',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ),
 
