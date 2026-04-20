@@ -1,4 +1,4 @@
-/// Tipo de cara del medidor para lectura de 9 dígitos (API: [reading_layout] / QR: meter_type).
+/// Tipo de cara del medidor (API: reading_layout): A = 5+4, B = 8 rodillos + 1 esfera (9 dígitos).
 typedef MeterReadingLayout = String;
 
 const String meterLayoutA = 'A';

@@ -1,8 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../../domain/models/meter_reading_layout.dart';
 import 'api_config.dart';
+
+const _kRefreshTokenKey = 'metscan_refresh_token';
+const _kRememberSessionKey = 'metscan_remember_session';
 
 class AssignedApartment {
   final int id;
@@ -83,6 +87,7 @@ class CyclePendingApartment {
 
 class CycleInfo {
   final int id;
+  final int buildingId;
   final String name;
   final String buildingName;
   final String monthName;
@@ -98,6 +103,7 @@ class CycleInfo {
 
   CycleInfo({
     required this.id,
+    this.buildingId = 0,
     required this.name,
     required this.buildingName,
     required this.monthName,
@@ -117,6 +123,7 @@ class CycleInfo {
 
   factory CycleInfo.fromJson(Map<String, dynamic> json) => CycleInfo(
         id: json['id'] as int,
+        buildingId: json['building_id'] as int? ?? 0,
         name: json['name'] as String? ?? '',
         buildingName: json['building_name'] as String? ?? '',
         monthName: json['month_name'] as String? ?? '',
@@ -134,8 +141,9 @@ class CycleInfo {
       );
 }
 
-class AuthService {
+class AuthService extends ChangeNotifier {
   final http.Client _client;
+  final FlutterSecureStorage _secureStorage;
 
   String? _accessToken;
   String? _refreshToken;
@@ -144,7 +152,48 @@ class AuthService {
   List<AssignedApartment> _assignedApartments = [];
   List<CycleInfo> _activeCycles = [];
 
-  AuthService({http.Client? client}) : _client = client ?? http.Client();
+  AuthService({
+    http.Client? client,
+    FlutterSecureStorage? secureStorage,
+  })  : _client = client ?? http.Client(),
+        _secureStorage = secureStorage ?? const FlutterSecureStorage();
+
+  /// Call once at startup when using "Mantener sesión iniciada".
+  Future<void> loadPersistedSession() async {
+    try {
+      final remember = await _secureStorage.read(key: _kRememberSessionKey);
+      final storedRefresh = await _secureStorage.read(key: _kRefreshTokenKey);
+      if (remember != 'true' || storedRefresh == null || storedRefresh.isEmpty) {
+        notifyListeners();
+        return;
+      }
+      _refreshToken = storedRefresh;
+      final ok = await refreshAccessToken();
+      if (ok) {
+        await _fetchUserProfile();
+      } else {
+        await _clearPersistedTokens();
+      }
+    } catch (e) {
+      debugPrint('[Auth] loadPersistedSession: $e');
+      await _clearPersistedTokens();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _persistTokensIfRemembered(bool rememberMe) async {
+    if (rememberMe && _refreshToken != null) {
+      await _secureStorage.write(key: _kRememberSessionKey, value: 'true');
+      await _secureStorage.write(key: _kRefreshTokenKey, value: _refreshToken!);
+    } else {
+      await _clearPersistedTokens();
+    }
+  }
+
+  Future<void> _clearPersistedTokens() async {
+    await _secureStorage.delete(key: _kRememberSessionKey);
+    await _secureStorage.delete(key: _kRefreshTokenKey);
+  }
 
   String? get accessToken => _accessToken;
   bool get isAuthenticated => _accessToken != null;
@@ -195,8 +244,12 @@ class AuthService {
     }
   }
 
-  /// Login with username and password. Returns true on success.
-  Future<bool> login(String username, String password) async {
+  /// Login with username and password. [rememberMe] guarda el refresh token en el dispositivo.
+  Future<bool> login(
+    String username,
+    String password, {
+    bool rememberMe = true,
+  }) async {
     try {
       final response = await _client.post(
         Uri.parse(ApiConfig.loginUrl),
@@ -210,8 +263,9 @@ class AuthService {
         _refreshToken = data['refresh'];
         debugPrint('[Auth] Login exitoso');
 
-        // Fetch user profile to get role and assigned apartments
         await _fetchUserProfile();
+        await _persistTokensIfRemembered(rememberMe);
+        notifyListeners();
         return true;
       }
 
@@ -272,12 +326,16 @@ class AuthService {
         final data = jsonDecode(response.body);
         _accessToken = data['access'];
         debugPrint('[Auth] Token refrescado');
+        final remember = await _secureStorage.read(key: _kRememberSessionKey);
+        if (remember == 'true' && _refreshToken != null) {
+          await _secureStorage.write(key: _kRefreshTokenKey, value: _refreshToken!);
+        }
         return true;
       }
 
-      // Refresh token expired, need to login again
       _accessToken = null;
       _refreshToken = null;
+      await _clearPersistedTokens();
       return false;
     } catch (e) {
       debugPrint('[Auth] Error refrescando token: $e');
@@ -285,15 +343,20 @@ class AuthService {
     }
   }
 
-  void logout() {
+  Future<void> logout() async {
     _accessToken = null;
     _refreshToken = null;
     _userRole = null;
     _displayName = null;
     _assignedApartments = [];
     _activeCycles = [];
+    await _clearPersistedTokens();
+    notifyListeners();
   }
 
   /// Re-fetch the profile without logging in again (useful to refresh cycle progress).
-  Future<void> refreshProfile() => _fetchUserProfile();
+  Future<void> refreshProfile() async {
+    await _fetchUserProfile();
+    notifyListeners();
+  }
 }

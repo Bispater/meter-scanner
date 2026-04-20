@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/app_providers.dart';
-import 'home_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -15,6 +14,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _rememberSession = true;
   String? _error;
 
   @override
@@ -40,14 +40,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final authService = ref.read(authServiceProvider);
-      final success = await authService.login(username, password);
+      final success = await authService.login(
+        username,
+        password,
+        rememberMe: _rememberSession,
+      );
 
       if (!mounted) return;
 
       if (success) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
+        // [MetscanApp] reconstruye home según sesión (ChangeNotifier).
       } else {
         setState(() {
           _error = 'Credenciales incorrectas';
@@ -93,7 +95,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 24),
 
                 Text(
-                  'HydroScan',
+                  'Metscan',
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
@@ -157,7 +159,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  value: _rememberSession,
+                  onChanged: _isLoading
+                      ? null
+                      : (v) => setState(() => _rememberSession = v ?? true),
+                  title: const Text(
+                    'Mantener sesión iniciada',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    'No pedir usuario en este dispositivo (puede cerrar sesión cuando quiera).',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 16),
 
                 // Login button
                 SizedBox(

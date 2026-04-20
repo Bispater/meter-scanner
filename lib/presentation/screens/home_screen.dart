@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/services/auth_service.dart';
+import '../../domain/measurement_cycle_helpers.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'qr_scanner_screen.dart';
 import 'prepare_measurement_screen.dart';
+import 'work_plan_screen.dart';
 
 // ── Provider that fetches recent measurements ──────────────────────────────
 final recentMeasurementsProvider = FutureProvider<List<WaterMeasurement>>((ref) async {
@@ -29,6 +31,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await auth.refreshProfile();
     ref.invalidate(recentMeasurementsProvider);
     if (mounted) setState(() => _refreshing = false);
+  }
+
+  Future<void> _logout() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text(
+          '¿Desea cerrar sesión? Se borrará la sesión en este dispositivo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await ref.read(authServiceProvider).logout();
   }
 
   @override
@@ -60,7 +86,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     const SizedBox(width: 8),
                     const Text(
-                      'HydroScan',
+                      'Metscan',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -69,6 +95,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ],
                 ),
                 actions: [
+                  IconButton(
+                    icon: const Icon(Icons.logout, color: Colors.white54),
+                    tooltip: 'Cerrar sesión',
+                    onPressed: _logout,
+                  ),
                   if (_refreshing)
                     const Padding(
                       padding: EdgeInsets.all(16),
@@ -127,6 +158,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const WorkPlanScreen()),
+                        ),
+                        icon: const Icon(Icons.checklist_rtl_rounded, size: 22),
+                        label: const Text('Plan de trabajo y asignación'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.secondary,
+                          side: BorderSide(
+                            color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.45),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
                     Center(
                       child: TextButton(
                         onPressed: () => _showManualEntryDialog(context),
@@ -220,7 +270,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
       );
 
-  void _navigateToMeter(BuildContext context, CyclePendingApartment apt) {
+  Future<void> _navigateToMeter(BuildContext context, CyclePendingApartment apt) async {
+    final repo = ref.read(measurementRepositoryProvider);
+    final list = await repo.getRecentMeasurements();
+    final auth = ref.read(authServiceProvider);
+    if (apartmentHasMeasurementInActiveCycleWindows(
+      apartmentId: apt.id,
+      meterId: apt.meterId,
+      measurements: list,
+      cycles: auth.activeCycles,
+      buildingName: apt.buildingName,
+    )) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ya hay medición en el período del ciclo para este departamento.'),
+        ),
+      );
+      return;
+    }
+    if (!context.mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(

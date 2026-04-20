@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import '../../domain/measurement_cycle_helpers.dart';
 import '../../domain/models/meter_reading_layout.dart';
 import '../../domain/models/qr_scan_data.dart';
 import '../providers/app_providers.dart';
@@ -37,35 +39,36 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 4),
       ),
     );
     _lastErrorTime = DateTime.now();
-    // Keep _isProcessing true for 2 seconds to prevent rapid re-scans
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _isProcessing = false);
-    });
   }
 
   void _onDetect(BarcodeCapture capture) {
     if (_isProcessing) return;
 
-    // Cooldown: skip if last error was less than 2 seconds ago
     if (_lastErrorTime != null &&
         DateTime.now().difference(_lastErrorTime!).inSeconds < 2) {
       return;
     }
 
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      final String? rawValue = barcode.rawValue;
-      if (rawValue == null) continue;
+    unawaited(_processCapture(capture));
+  }
 
-      // Skip if this is the same QR we just rejected
-      if (rawValue == _lastRejectedValue) return;
+  Future<void> _processCapture(BarcodeCapture capture) async {
+    final barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
 
-      setState(() => _isProcessing = true);
+    final barcode = barcodes.first;
+    final String? rawValue = barcode.rawValue;
+    if (rawValue == null) return;
 
+    if (rawValue == _lastRejectedValue) return;
+
+    setState(() => _isProcessing = true);
+
+    try {
       String qrCode = '';
       String apartmentInfo = '';
       int? apartmentId;
@@ -73,8 +76,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
       var parsedJsonQr = false;
 
       try {
-        // Try to parse as JSON: {"qr_code": "1409A", "apartment_info": "...", "apartment_id": 1}
-        // Also supports legacy format with "meter_id" key
         final Map<String, dynamic> data = jsonDecode(rawValue);
         final qrData = QrScanData.fromJson(data);
         parsedJsonQr = true;
@@ -83,7 +84,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
         apartmentId = qrData.apartmentId;
         meterReadingLayout = qrData.meterType;
       } catch (_) {
-        // Plain text: either "1409A" or legacy "meter_id|apartment_info"
         final parts = rawValue.split('|');
         if (parts.length >= 2) {
           qrCode = parts[0].trim();
@@ -99,7 +99,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
         return;
       }
 
-      // Validate against assigned apartments
       final authService = ref.read(authServiceProvider);
       if (!authService.canAccessByQrCode(qrCode)) {
         _lastRejectedValue = rawValue;
@@ -107,15 +106,58 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
         return;
       }
 
-      // Resolve apartment_id from assigned apartments if not in QR
       apartmentId ??= authService.getApartmentIdByQrCode(qrCode);
 
-      // QR sin JSON: tomar tipo desde asignación en /me
       if (!parsedJsonQr) {
         meterReadingLayout = authService.getReadingLayoutForQrOrMeter(qrCode);
       }
 
-      // Clear any error snackbars before navigating
+      final repo = ref.read(measurementRepositoryProvider);
+      final measurements = await repo.getRecentMeasurements();
+
+      String buildingName = '';
+      try {
+        final a = authService.assignedApartments.firstWhere(
+          (x) =>
+              (apartmentId != null && x.id == apartmentId) ||
+              x.qrCode == qrCode ||
+              x.meterId == qrCode,
+        );
+        buildingName = a.buildingName;
+      } catch (_) {}
+
+      var duplicate = false;
+      if (buildingName.isNotEmpty) {
+        duplicate = apartmentHasMeasurementInActiveCycleWindows(
+          apartmentId: apartmentId,
+          meterId: qrCode,
+          measurements: measurements,
+          cycles: authService.activeCycles,
+          buildingName: buildingName,
+        );
+      } else if (authService.userRole == 'admin') {
+        for (final c in authService.activeCycles) {
+          for (final m in measurements) {
+            if (m.meterId == qrCode &&
+                capturedInCycleWindow(m.dateTime, c.scheduledDate, c.deadline)) {
+              duplicate = true;
+              break;
+            }
+          }
+          if (duplicate) break;
+        }
+      }
+
+      if (duplicate) {
+        _lastRejectedValue = rawValue;
+        _showError(
+          'Ya hay una medición registrada para este departamento en el período del ciclo actual. '
+          'No se puede volver a medir desde la app.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
 
       Navigator.pushReplacement(
@@ -129,6 +171,8 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
           ),
         ),
       );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -163,7 +207,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
             onDetect: _onDetect,
           ),
 
-          // Overlay with scan area indicator
           Center(
             child: Container(
               width: 250,
@@ -178,7 +221,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
             ),
           ),
 
-          // Bottom instruction
           Positioned(
             bottom: 80,
             left: 0,
@@ -203,7 +245,6 @@ class _QrScannerScreenState extends ConsumerState<QrScannerScreen> {
             ),
           ),
 
-          // Loading indicator
           if (_isProcessing)
             Container(
               color: Colors.black54,

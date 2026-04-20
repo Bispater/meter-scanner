@@ -6,9 +6,9 @@ import '../../domain/models/qr_scan_data.dart';
 import '../../domain/models/water_measurement.dart';
 import '../../domain/repositories/measurement_repository.dart';
 
-// Auth service (singleton)
-final authServiceProvider = Provider<AuthService>((ref) {
-  return AuthService();
+/// Inicializado en [main] con [overrideWith] y [AuthService.loadPersistedSession].
+final authServiceProvider = ChangeNotifierProvider<AuthService>((ref) {
+  throw UnimplementedError('AuthService: usar ProviderScope(overrides: ...) desde main.dart');
 });
 
 // Repository provider

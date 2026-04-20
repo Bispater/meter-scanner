@@ -42,9 +42,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>HydroScan necesita acceso a la cámara para escanear códigos QR y capturar lecturas de medidores de agua.</string>
+	<string>Metscan necesita acceso a la cámara para escanear códigos QR y capturar lecturas de medidores de agua.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>HydroScan necesita acceso a la galería para guardar fotos de medidores.</string>
+	<string>Metscan necesita acceso a la galería para guardar fotos de medidores.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

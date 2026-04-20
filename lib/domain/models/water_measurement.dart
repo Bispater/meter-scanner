@@ -1,3 +1,6 @@
+import '../meter_reading_input.dart';
+import 'meter_reading_layout.dart';
+
 class WaterMeasurement {
   final String? id;
   final int? apartmentId;
@@ -8,6 +11,8 @@ class WaterMeasurement {
   final bool modifiedByUser;
   final String photoPath;
   final DateTime dateTime;
+  /// `'A'` / `'B'` desde API; si es null se asume A en formateo.
+  final String? readingLayout;
 
   WaterMeasurement({
     this.id,
@@ -19,6 +24,7 @@ class WaterMeasurement {
     this.modifiedByUser = false,
     required this.photoPath,
     required this.dateTime,
+    this.readingLayout,
   });
 
   Map<String, dynamic> toJson() {
@@ -41,7 +47,7 @@ class WaterMeasurement {
       meterId: json['meter_id'] as String? ?? '',
       apartmentInfo: json['apartment_info'] as String? ??
           json['apartment_number'] as String? ?? '',
-      value: json['reading_value']?.toString() ?? json['value'] as String? ?? '',
+      value: json['reading_value'] != null ? json['reading_value'].toString() : json['value']?.toString() ?? '',
       ocrValue: json['ocr_value'] as String? ?? '',
       modifiedByUser: json['modified_by_user'] as bool? ?? false,
       photoPath: json['photo_url'] as String? ?? json['photo_path'] as String? ?? '',
@@ -50,6 +56,7 @@ class WaterMeasurement {
           : json['date_time'] != null
               ? DateTime.parse(json['date_time'] as String)
               : DateTime.now(),
+      readingLayout: json['reading_layout'] as String?,
     );
   }
 
@@ -63,6 +70,7 @@ class WaterMeasurement {
     bool? modifiedByUser,
     String? photoPath,
     DateTime? dateTime,
+    String? readingLayout,
   }) {
     return WaterMeasurement(
       id: id ?? this.id,
@@ -74,16 +82,15 @@ class WaterMeasurement {
       modifiedByUser: modifiedByUser ?? this.modifiedByUser,
       photoPath: photoPath ?? this.photoPath,
       dateTime: dateTime ?? this.dateTime,
+      readingLayout: readingLayout ?? this.readingLayout,
     );
   }
 
-  /// Display helper for meter-style reading: 00546,1188
+  /// Display helper según cara A/B (usa [readingLayout] o A por defecto).
   String get formattedMeterValue {
+    final layout = normalizeMeterReadingLayout(readingLayout);
     final digits = value.replaceAll(RegExp(r'[^0-9Xx]'), '').toUpperCase();
     if (digits.isEmpty) return value;
-    final right = digits.length >= 4 ? digits.substring(digits.length - 4) : digits.padLeft(4, '0');
-    final leftRaw = digits.length > 4 ? digits.substring(0, digits.length - 4) : '';
-    final left = leftRaw.padLeft(5, '0');
-    return '$left,$right';
+    return formatMeterDigitsForDisplay(digits, layout);
   }
 }

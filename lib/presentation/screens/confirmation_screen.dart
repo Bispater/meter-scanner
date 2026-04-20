@@ -1,11 +1,15 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../domain/meter_reading_input.dart';
 import '../../domain/models/meter_reading_layout.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
-import 'home_screen.dart';
+import 'home_screen.dart' show recentMeasurementsProvider;
+import 'meter_photo_viewer_screen.dart';
 
 class ConfirmationScreen extends ConsumerStatefulWidget {
   final String meterId;
@@ -28,106 +32,128 @@ class ConfirmationScreen extends ConsumerStatefulWidget {
 }
 
 class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
-  final TextEditingController _valueController = TextEditingController();
   final TextEditingController _wholePartController = TextEditingController();
   final TextEditingController _decimalPartController = TextEditingController();
-  bool _isLoadingOcr = true;
   bool _isSubmitting = false;
-  String? _ocrError;
   String? _croppedPath;
-  String _originalOcrValue = '';
+  bool _cropping = true;
+
+  bool get _isLayoutB => widget.meterReadingLayout == meterLayoutB;
+
+  MeterDigitLayout get _layout => meterDigitLayoutFor(widget.meterReadingLayout);
 
   @override
   void initState() {
     super.initState();
-    _runOcr();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prepareCrop());
+  }
+
+  Future<void> _prepareCrop() async {
+    try {
+      final ocrService = ref.read(ocrServiceProvider);
+      final cropped = await ocrService.cropToCircleZone(widget.photoPath);
+      if (mounted) {
+        setState(() {
+          _croppedPath = cropped;
+          _cropping = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _cropping = false);
+    }
   }
 
   @override
   void dispose() {
-    _valueController.dispose();
     _wholePartController.dispose();
     _decimalPartController.dispose();
-    // Clean up temp cropped image
     if (_croppedPath != null) {
-      try { File(_croppedPath!).delete(); } catch (_) {}
+      try {
+        File(_croppedPath!).delete();
+      } catch (_) {}
     }
     super.dispose();
   }
 
-  Future<void> _runOcr() async {
-    setState(() {
-      _isLoadingOcr = true;
-      _ocrError = null;
-    });
+  String _combinedDigits() {
+    final w = sanitizeMeterDigits(_wholePartController.text, maxLen: _layout.integerDigits);
+    final d = sanitizeMeterDigits(_decimalPartController.text, maxLen: _layout.fractionalDigits);
+    return '$w$d';
+  }
 
-    try {
-      final ocrService = ref.read(ocrServiceProvider);
-
-      // 1. Crop to circle zone (for display and analysis)
-      if (_croppedPath == null) {
-        final cropped = await ocrService.cropToCircleZone(widget.photoPath);
-        if (mounted && cropped != null) {
-          setState(() => _croppedPath = cropped);
-        }
-      }
-
-      // 2. Analyze the cropped image (or full image as fallback)
-      final pathToAnalyze = _croppedPath ?? widget.photoPath;
-      final result = await ocrService.analyzeImage(
-        pathToAnalyze,
-        meterReadingType: widget.meterReadingLayout == meterLayoutB ? 'B' : 'A',
+  void _onWholeChanged(String value) {
+    final maxL = _layout.integerDigits;
+    final sanitized = sanitizeMeterDigits(value, maxLen: maxL);
+    if (sanitized != value) {
+      _wholePartController.value = TextEditingValue(
+        text: sanitized,
+        selection: TextSelection.collapsed(offset: sanitized.length),
       );
-      if (mounted) {
-        final normalized = _normalizeReading(result);
-        setState(() {
-          _originalOcrValue = normalized;
-          _setReadingFromRaw(normalized);
-          _isLoadingOcr = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _ocrError = e.toString();
-          _isLoadingOcr = false;
-        });
-      }
     }
+    setState(() {});
+  }
+
+  void _onDecimalChanged(String value) {
+    final maxL = _layout.fractionalDigits;
+    final sanitized = sanitizeMeterDigits(value, maxLen: maxL);
+    if (sanitized != value) {
+      _decimalPartController.value = TextEditingValue(
+        text: sanitized,
+        selection: TextSelection.collapsed(offset: sanitized.length),
+      );
+    }
+    setState(() {});
   }
 
   Future<void> _submitMeasurement() async {
-    final value = _normalizeReading(_valueController.text.trim());
-    if (value.isEmpty) {
+    final combined = _combinedDigits();
+    final hasAny = combined.isNotEmpty;
+    final complete = isCompleteReading(combined, widget.meterReadingLayout);
+
+    if (hasAny && !complete) {
+      final need = _layout.totalDigits;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ingrese un valor de lectura'),
+        SnackBar(
+          content: Text(
+            _isLayoutB
+                ? 'Complete los $need dígitos (8 enteros en rodillos + 1 dígito de esfera).'
+                : 'Complete los $need dígitos (5 enteros + 4 esferas).',
+          ),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
-    if (value.length != 9) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('La lectura debe tener 9 dígitos (5 enteros + 4 decimales/esferas).'),
-          backgroundColor: Colors.orange,
+
+    if (!hasAny) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Enviar sin lectura escrita'),
+          content: const Text(
+            'La foto se enviará al servidor y la lectura se estimará allí con IA. '
+            'Podrá revisarla luego en el panel.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enviar')),
+          ],
         ),
       );
-      return;
+      if (go != true || !mounted) return;
     }
 
     setState(() => _isSubmitting = true);
 
     try {
-      final wasModified = value != _originalOcrValue;
+      final manual = complete ? combined : '';
       final measurement = WaterMeasurement(
         meterId: widget.meterId,
         apartmentInfo: widget.apartmentInfo,
         apartmentId: widget.apartmentId,
-        value: value,
-        ocrValue: _originalOcrValue,
-        modifiedByUser: wasModified,
+        value: manual,
+        ocrValue: '',
+        modifiedByUser: manual.isNotEmpty,
         photoPath: widget.photoPath,
         dateTime: DateTime.now(),
       );
@@ -136,7 +162,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       await repository.submitMeasurement(measurement);
 
       if (!mounted) return;
-      _showSuccessDialog();
+      _showSuccessDialog(manual);
     } catch (e) {
       if (mounted) {
         final message = e.toString().replaceFirst('Exception: ', '');
@@ -149,101 +175,51 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  String _normalizeReading(String raw) {
-    final upper = raw.toUpperCase();
-    final cleaned = upper.replaceAll(RegExp(r'[^0-9X]'), '');
-    return cleaned.length > 9 ? cleaned.substring(0, 9) : cleaned;
+  void _openPhotoViewer(String path) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => MeterPhotoViewerScreen(imagePath: path),
+      ),
+    );
   }
 
-  String _formatMeterReading(String raw) {
-    final normalized = _normalizeReading(raw);
-    if (normalized.isEmpty) return raw;
-    final right = normalized.length >= 4
-        ? normalized.substring(normalized.length - 4)
-        : normalized.padLeft(4, '0');
-    final leftRaw = normalized.length > 4
-        ? normalized.substring(0, normalized.length - 4)
-        : '';
-    final left = leftRaw.padLeft(5, '0');
-    return '$left,$right';
-  }
-
-  void _setReadingFromRaw(String raw) {
-    final normalized = _normalizeReading(raw);
-    _valueController.text = normalized;
-    final whole = normalized.length <= 5 ? normalized : normalized.substring(0, 5);
-    final decimal = normalized.length <= 5 ? '' : normalized.substring(5);
-    _wholePartController.text = whole;
-    _decimalPartController.text = decimal;
-  }
-
-  void _onWholeChanged(String value) {
-    final sanitized = _normalizeReading(value);
-    if (sanitized != value) {
-      _wholePartController.value = TextEditingValue(
-        text: sanitized,
-        selection: TextSelection.collapsed(offset: sanitized.length),
-      );
-    }
-    final combined = _normalizeReading('${_wholePartController.text}${_decimalPartController.text}');
-    _setReadingFromRaw(combined);
-  }
-
-  void _onDecimalChanged(String value) {
-    final sanitized = _normalizeReading(value);
-    if (sanitized != value) {
-      _decimalPartController.value = TextEditingValue(
-        text: sanitized,
-        selection: TextSelection.collapsed(offset: sanitized.length),
-      );
-    }
-    final combined = _normalizeReading('${_wholePartController.text}${_decimalPartController.text}');
-    _setReadingFromRaw(combined);
-  }
-
-  void _showSuccessDialog() {
+  void _showSuccessDialog(String manualDigits) {
+    final formatted = manualDigits.isEmpty
+        ? '— (pendiente de IA)'
+        : '${formatMeterDigitsForDisplay(manualDigits, widget.meterReadingLayout)} m³';
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(
-          Icons.check_circle_rounded,
-          color: Colors.green,
-          size: 64,
-        ),
-        title: const Text('¡Medición Enviada!'),
+        icon: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 64),
+        title: const Text('¡Medición enviada!'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text('Medidor: ${widget.meterId}', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 8),
             Text(
-              'Medidor: ${widget.meterId}',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            Text(
-              'Valor: ${_formatMeterReading(_valueController.text)} m³',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
+              manualDigits.isEmpty
+                  ? 'La lectura se calculará en el servidor.'
+                  : 'Valor enviado: $formatted',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
         actions: [
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              // Go back to home
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const HomeScreen()),
-                (route) => false,
-              );
+              await ref.read(authServiceProvider).refreshProfile();
+              ref.invalidate(recentMeasurementsProvider);
+              if (!mounted) return;
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
             child: const Text('Volver al Inicio'),
           ),
@@ -255,50 +231,79 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final previewPath = _croppedPath ?? widget.photoPath;
+    final displayLine = formatMeterDigitsForDisplay(_combinedDigits(), widget.meterReadingLayout);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Confirmar Lectura'),
-      ),
+      appBar: AppBar(title: const Text('Confirmar Lectura')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Photo preview
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  height: 280,
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: theme.colorScheme.secondary.withValues(alpha: 0.5),
-                      width: 2,
+              GestureDetector(
+                onTap: () => _openPhotoViewer(previewPath),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    height: 280,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: theme.colorScheme.secondary.withValues(alpha: 0.5),
+                        width: 2,
+                      ),
                     ),
-                  ),
-                  child: Image.file(
-                    File(_croppedPath ?? widget.photoPath),
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Center(
-                      child: Icon(Icons.broken_image, size: 48, color: Colors.white38),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (_cropping)
+                          const Center(child: CircularProgressIndicator())
+                        else
+                          Image.file(
+                            File(previewPath),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(Icons.broken_image, size: 48, color: Colors.white38),
+                            ),
+                          ),
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.zoom_in, size: 18, color: theme.colorScheme.secondary),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Toca para ampliar',
+                                  style: TextStyle(color: theme.colorScheme.secondary, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-
-              // Action buttons row
+              const SizedBox(height: 12),
               Row(
                 children: [
-                  // Re-analyze button
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: _isLoadingOcr ? null : _runOcr,
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Re-analizar'),
+                      onPressed: _cropping ? null : () => _openPhotoViewer(previewPath),
+                      icon: const Icon(Icons.fullscreen, size: 18),
+                      label: const Text('Ver foto en grande'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: theme.colorScheme.secondary,
                         side: BorderSide(color: theme.colorScheme.secondary.withValues(alpha: 0.5)),
@@ -306,7 +311,6 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // Retake button
                   TextButton.icon(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.replay_rounded, size: 18),
@@ -315,9 +319,8 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
 
-              // OCR Result section
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
@@ -326,151 +329,98 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.auto_fix_high_rounded,
-                              color: theme.colorScheme.secondary, size: 20),
+                          Icon(Icons.edit_note_rounded, color: theme.colorScheme.secondary, size: 22),
                           const SizedBox(width: 8),
-                          Text(
-                            'Lectura Detectada (Gemini AI)',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
+                          Expanded(
+                            child: Text(
+                              'Lectura manual (opcional)',
+                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
                       ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _isLayoutB
+                            ? 'Tipo B: 8 dígitos en rodillos negros + 1 dígito leído en la esfera roja.'
+                            : 'Tipo A: 5 dígitos enteros y 4 esferas decimales.',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 13, height: 1.35),
+                      ),
                       const SizedBox(height: 16),
-
-                      if (_isLoadingOcr)
-                        const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(height: 12),
-                                Text(
-                                  'Analizando imagen con IA...',
-                                  style: TextStyle(color: Colors.white54),
-                                ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _wholePartController,
+                              onChanged: _onWholeChanged,
+                              keyboardType: TextInputType.text,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
                               ],
-                            ),
-                          ),
-                        )
-                      else ...[
-                        if (_ocrError != null)
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _ocrError!,
+                              maxLength: _layout.integerDigits,
+                              decoration: InputDecoration(
+                                labelText: _isLayoutB ? 'Enteros (8)' : 'Enteros (5)',
+                                counterText: '',
+                              ),
                               style: const TextStyle(
-                                  color: Colors.orange, fontSize: 12),
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 2,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
                           ),
-
-                        // Editable value field
-                        TextField(
-                          controller: _valueController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          style: const TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: 4,
-                          ),
-                          textAlign: TextAlign.center,
-                          decoration: InputDecoration(
-                            labelText: 'Valor del Medidor (m³)',
-                            suffixText: 'm³',
-                            suffixStyle: TextStyle(
-                              color: theme.colorScheme.secondary,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: _decimalPartController,
+                              onChanged: _onDecimalChanged,
+                              keyboardType: TextInputType.text,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
+                              ],
+                              maxLength: _layout.fractionalDigits,
+                              decoration: InputDecoration(
+                                labelText: _isLayoutB ? 'Esfera (1 dígito)' : 'Esferas / decimales (4)',
+                                helperText: _isLayoutB ? 'Lectura del puntero rojo' : null,
+                                counterText: '',
+                              ),
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 2,
+                                color: theme.colorScheme.secondary,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
-                            helperText:
-                                'Formato esperado: 9 dígitos (5 enteros + 4 decimales/esferas)',
-                            helperStyle:
-                                const TextStyle(color: Colors.white38),
                           ),
-                        ),
-                        const SizedBox(height: 8),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (displayLine.isNotEmpty)
                         Align(
                           alignment: Alignment.centerRight,
                           child: Text(
-                            'Formato medidor: ${_formatMeterReading(_valueController.text)}',
+                            'Vista medidor: $displayLine',
                             style: TextStyle(
                               color: theme.colorScheme.secondary,
-                              fontSize: 12,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
+                              fontFamily: 'monospace',
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _wholePartController,
-                                onChanged: _onWholeChanged,
-                                maxLength: 5,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
-                                ],
-                                decoration: const InputDecoration(
-                                  labelText: 'Enteros (5)',
-                                  counterText: '',
-                                ),
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 2,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: TextField(
-                                controller: _decimalPartController,
-                                onChanged: _onDecimalChanged,
-                                maxLength: 4,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
-                                ],
-                                decoration: const InputDecoration(
-                                  labelText: 'Esferas/decimales (4)',
-                                  counterText: '',
-                                ),
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 2,
-                                  color: theme.colorScheme.secondary,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-
-              // Meter info summary
+              const SizedBox(height: 12),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      const Icon(Icons.info_outline,
-                          size: 20, color: Colors.white38),
+                      const Icon(Icons.info_outline, size: 20, color: Colors.white38),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -478,13 +428,11 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                           children: [
                             Text(
                               'Medidor: ${widget.meterId}',
-                              style: const TextStyle(
-                                  color: Colors.white70, fontSize: 13),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
                             ),
                             Text(
                               'Depto: ${widget.apartmentInfo}',
-                              style: const TextStyle(
-                                  color: Colors.white70, fontSize: 13),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
                             ),
                           ],
                         ),
@@ -493,27 +441,18 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 32),
-
-              // Submit button
+              const SizedBox(height: 28),
               ElevatedButton.icon(
-                onPressed: _isSubmitting || _isLoadingOcr
-                    ? null
-                    : _submitMeasurement,
+                onPressed: _isSubmitting ? null : _submitMeasurement,
                 icon: _isSubmitting
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.black54,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
                       )
                     : const Icon(Icons.cloud_upload_rounded, size: 24),
-                label: Text(_isSubmitting ? 'Enviando...' : 'Enviar Medición'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                ),
+                label: Text(_isSubmitting ? 'Enviando...' : 'Enviar medición'),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18)),
               ),
               const SizedBox(height: 16),
             ],

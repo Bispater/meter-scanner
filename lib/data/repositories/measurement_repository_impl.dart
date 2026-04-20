@@ -26,7 +26,13 @@ class MeasurementRepositoryImpl implements MeasurementRepository {
       if (measurement.apartmentId != null) {
         request.fields['apartment'] = measurement.apartmentId.toString();
       }
-      request.fields['reading_value'] = measurement.value;
+      final rv = measurement.value.trim();
+      if (rv.isNotEmpty) {
+        final digitsOnly = rv.replaceAll(RegExp(r'[^0-9]'), '');
+        if (digitsOnly.isNotEmpty) {
+          request.fields['reading_value'] = int.parse(digitsOnly).toString();
+        }
+      }
       request.fields['ocr_value'] = measurement.ocrValue;
       request.fields['modified_by_user'] = measurement.modifiedByUser.toString();
       request.fields['captured_at'] = measurement.dateTime.toIso8601String();
