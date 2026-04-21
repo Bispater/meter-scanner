@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.hydroscan.hydroscan_cam"
+    namespace = "com.metscan.metscan_app"
     // Plugins (mobile_scanner, camera_android_camerax, etc.) require compileSdk 36 + NDK 27.
     compileSdk = 36
     ndkVersion = "27.0.12077973"
@@ -22,7 +22,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.hydroscan.hydroscan_cam"
+        applicationId = "com.metscan.metscan_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24 // flutter_secure_storage; camera/camerax stack also supports 24+.
