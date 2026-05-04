@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 import '../../data/services/auth_service.dart';
 import '../../domain/measurement_cycle_helpers.dart';
+import '../../domain/models/meter_reading_layout.dart' show meterTypeChipLabel;
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'home_screen.dart' show recentMeasurementsProvider;
@@ -31,7 +32,7 @@ class _WorkPlanScreenState extends ConsumerState<WorkPlanScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: 1);
     _searchController.addListener(() {
       setState(() => _query = _searchController.text.trim().toLowerCase());
     });
@@ -718,6 +719,14 @@ class _PendingTile extends StatelessWidget {
                         fontFamily: 'monospace',
                       ),
                     ),
+                    Text(
+                      meterTypeChipLabel(apt.readingLayout),
+                      style: TextStyle(
+                        color: accent.withValues(alpha: 0.75),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -804,6 +813,14 @@ class _AssignedTile extends StatelessWidget {
                         color: Colors.white54,
                         fontSize: 11,
                         fontFamily: 'monospace',
+                      ),
+                    ),
+                    Text(
+                      meterTypeChipLabel(apt.readingLayout),
+                      style: TextStyle(
+                        color: accent.withValues(alpha: 0.75),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],

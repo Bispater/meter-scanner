@@ -3,7 +3,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-import '../../domain/models/meter_reading_layout.dart';
+import '../../domain/models/meter_reading_layout.dart'
+    show meterLayoutB, meterLayoutA, meterTypeChipLabel;
 import '../widgets/meter_overlay_painter.dart';
 import 'confirmation_screen.dart';
 
@@ -243,50 +244,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
           ),
         ),
 
-        // Silueta de referencia (Tipo A / B) — mismo tamaño que recorte OCR (76% ancho)
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Builder(
-              builder: (context) {
-                final w = MediaQuery.sizeOf(context).width;
-                final side = w * 0.76;
-                return Center(
-                  child: SizedBox(
-                    width: side,
-                    height: side,
-                    child: Opacity(
-                      opacity: 0.4,
-                      child: Image.asset(
-                        widget.meterReadingLayout == meterLayoutB
-                            ? 'assets/meter-types/type_B.png'
-                            : 'assets/meter-types/type_A.png',
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => Center(
-                          child: Text(
-                            widget.meterReadingLayout == meterLayoutB
-                                ? 'Tipo B'
-                                : 'Tipo A',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-
-        // Dark overlay with circular cutout
+        // Guía: solo trazos (CustomPaint), sin imagen sólida encima de la cámara
         Positioned.fill(
           child: CustomPaint(
-            painter: MeterOverlayPainter(),
+            painter: MeterOverlayPainter(
+              isTypeB: widget.meterReadingLayout == meterLayoutB,
+            ),
           ),
         ),
 
@@ -297,12 +260,15 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
               38,
           left: 0,
           right: 0,
-          child: const Center(
+          child: Center(
             child: Text(
-              'Alinee la lectura dentro del recuadro',
-              style: TextStyle(
+              widget.meterReadingLayout == meterLayoutB
+                  ? 'Encaje la franja de números y, si aplica, la esfera en el círculo pequeño'
+                  : 'Alinee la lectura dentro del recuadro (5+4 columnas)',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
                 color: Colors.white70,
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -373,12 +339,17 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
               children: [
                 const Icon(Icons.speed, size: 16, color: Colors.white54),
                 const SizedBox(width: 8),
-                Text(
-                  '${widget.meterId} — ${widget.apartmentInfo}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                Flexible(
+                  child: Text(
+                    '${widget.meterId} — ${widget.apartmentInfo} · ${meterTypeChipLabel(widget.meterReadingLayout)}',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],

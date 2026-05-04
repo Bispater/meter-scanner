@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../../domain/models/meter_reading_layout.dart';
+import '../../domain/reading_value_codec.dart';
 import '../../domain/models/water_measurement.dart';
 import '../../domain/repositories/measurement_repository.dart';
 import '../services/api_config.dart';
@@ -28,9 +30,12 @@ class MeasurementRepositoryImpl implements MeasurementRepository {
       }
       final rv = measurement.value.trim();
       if (rv.isNotEmpty) {
-        final digitsOnly = rv.replaceAll(RegExp(r'[^0-9]'), '');
-        if (digitsOnly.isNotEmpty) {
-          request.fields['reading_value'] = int.parse(digitsOnly).toString();
+        final m3 = readingDigitsToApiM3String(
+          rv,
+          measurement.readingLayout ?? meterLayoutA,
+        );
+        if (m3.isNotEmpty) {
+          request.fields['reading_value'] = m3;
         }
       }
       request.fields['ocr_value'] = measurement.ocrValue;

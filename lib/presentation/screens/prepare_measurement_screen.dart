@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../domain/models/meter_reading_layout.dart';
+import '../../domain/models/meter_reading_layout.dart'
+    show meterLayoutA, meterTypeChipLabel;
 import 'camera_capture_screen.dart';
 
 class PrepareMeasurementScreen extends StatelessWidget {
@@ -25,12 +26,12 @@ class PrepareMeasurementScreen extends StatelessWidget {
         title: const Text('Preparar Medición'),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
 
               // Success indicator
               Icon(
@@ -81,6 +82,13 @@ class PrepareMeasurementScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
 
+                      _InfoRow(
+                        icon: Icons.tune_rounded,
+                        label: 'Cara del medidor',
+                        value: meterTypeChipLabel(meterReadingLayout),
+                      ),
+                      const SizedBox(height: 16),
+
                       // Timestamp
                       _InfoRow(
                         icon: Icons.access_time_rounded,
@@ -92,7 +100,7 @@ class PrepareMeasurementScreen extends StatelessWidget {
                 ),
               ),
 
-              const Spacer(),
+              const SizedBox(height: 20),
 
               // Instructions
               Container(
@@ -113,7 +121,7 @@ class PrepareMeasurementScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Centre el medidor dentro de la guía circular para una lectura precisa.',
+                        'Encaje el medidor en la guía (círculo y recuadro) para una foto clara.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: Colors.white70,
                         ),

@@ -2,6 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/services/auth_service.dart';
 import '../../domain/measurement_cycle_helpers.dart';
+import '../../domain/models/meter_reading_layout.dart'
+    show
+        meterLayoutA,
+        meterTypeChipLabel,
+        meterTypeDescription,
+        normalizeMeterReadingLayout;
+import '../../domain/reading_value_codec.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'qr_scanner_screen.dart';
@@ -616,67 +623,80 @@ class _MeasurementTile extends StatelessWidget {
     final accent = Theme.of(context).colorScheme.secondary;
     final dateStr = _formatDate(measurement.dateTime);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
+    return InkWell(
+      onTap: () => _showDetails(context),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.speed, color: accent, size: 20),
             ),
-            child: Icon(Icons.speed, color: accent, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    measurement.displayLocation,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    measurement.meterId,
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    meterTypeChipLabel(measurement.readingLayout ?? meterLayoutA),
+                    style: TextStyle(
+                      color: accent.withValues(alpha: 0.75),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  measurement.apartmentInfo,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                  '${measurement.formattedMeterValue} m³',
+                  style: TextStyle(
+                    color: accent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
                   ),
                 ),
                 Text(
-                  measurement.meterId,
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
+                  dateStr,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${measurement.formattedMeterValue} m³',
-                style: TextStyle(
-                  color: accent,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                dateStr,
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -690,6 +710,59 @@ class _MeasurementTile extends StatelessWidget {
       return 'Ayer';
     }
     return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  }
+
+  void _showDetails(BuildContext context) {
+    final layout = normalizeMeterReadingLayout(measurement.readingLayout);
+    final opLine = measurement.value.isEmpty
+        ? '—'
+        : '${measurement.formattedMeterValue} m³';
+    final ocrRaw = measurement.ocrValue.trim();
+    String? aiLine;
+    if (ocrRaw.isNotEmpty) {
+      final ocrNorm = normalizeApiReadingToDisplayDigits(ocrRaw, layout);
+      aiLine = '${formatCubicMetersTypeA5Plus4(ocrNorm)} m³';
+    }
+    final captured = measurement.dateTime;
+    final capturedStr =
+        '${captured.day.toString().padLeft(2, '0')}/${captured.month.toString().padLeft(2, '0')}/${captured.year} '
+        '${captured.hour.toString().padLeft(2, '0')}:${captured.minute.toString().padLeft(2, '0')}:${captured.second.toString().padLeft(2, '0')}';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Detalle de medición'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(measurement.displayLocation, style: const TextStyle(color: Colors.white)),
+            const SizedBox(height: 4),
+            Text('Medidor: ${measurement.meterId}', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 12),
+            Text('Lectura registrada: $opLine', style: const TextStyle(color: Colors.white)),
+            const SizedBox(height: 6),
+            Text(
+              'Estimación automática: ${aiLine ?? '—'}',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Cara: ${meterTypeDescription(layout)}',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 6),
+            Text('Fecha y hora de captura: $capturedStr', style: const TextStyle(color: Colors.white70)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/meter_reading_input.dart';
-import '../../domain/models/meter_reading_layout.dart';
+import '../../domain/models/meter_reading_layout.dart'
+    show meterLayoutA, meterLayoutB, meterTypeChipLabel, meterTypeDescription;
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
 import 'home_screen.dart' show recentMeasurementsProvider;
@@ -116,7 +117,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         SnackBar(
           content: Text(
             _isLayoutB
-                ? 'Complete los $need dígitos (8 enteros en rodillos + 1 dígito de esfera).'
+                ? 'Complete los $need dígitos (5 enteros + 4 decimales: en tipo B, 5 negros + 3 rojos en barra + 1 esfera).'
                 : 'Complete los $need dígitos (5 enteros + 4 esferas).',
           ),
           backgroundColor: Colors.orange,
@@ -156,6 +157,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         modifiedByUser: manual.isNotEmpty,
         photoPath: widget.photoPath,
         dateTime: DateTime.now(),
+        readingLayout: widget.meterReadingLayout,
       );
 
       final repository = ref.read(measurementRepositoryProvider);
@@ -198,10 +200,16 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       builder: (ctx) => AlertDialog(
         icon: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 64),
         title: const Text('¡Medición enviada!'),
+        actionsAlignment: MainAxisAlignment.center,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('Medidor: ${widget.meterId}', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 4),
+            Text(
+              meterTypeChipLabel(widget.meterReadingLayout),
+              style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 8),
             Text(
               manualDigits.isEmpty
@@ -214,18 +222,23 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         ),
         actions: [
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               Navigator.of(ctx).pop();
-              await ref.read(authServiceProvider).refreshProfile();
-              ref.invalidate(recentMeasurementsProvider);
-              if (!mounted) return;
               Navigator.of(context).popUntil((route) => route.isFirst);
+              _refreshHomeDataInBackground();
             },
             child: const Text('Volver al Inicio'),
           ),
         ],
       ),
     );
+  }
+
+  void _refreshHomeDataInBackground() {
+    Future<void>(() async {
+      await ref.read(authServiceProvider).refreshProfile();
+      ref.invalidate(recentMeasurementsProvider);
+    });
   }
 
   @override
@@ -235,7 +248,28 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
     final displayLine = formatMeterDigitsForDisplay(_combinedDigits(), widget.meterReadingLayout);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Confirmar Lectura')),
+      appBar: AppBar(
+        toolbarHeight: 72,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Confirmar Lectura'),
+            const SizedBox(height: 2),
+            Text(
+              meterTypeDescription(widget.meterReadingLayout),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.secondary.withValues(alpha: 0.95),
+                fontWeight: FontWeight.w500,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -342,12 +376,13 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                       const SizedBox(height: 6),
                       Text(
                         _isLayoutB
-                            ? 'Tipo B: 8 dígitos en rodillos negros + 1 dígito leído en la esfera roja.'
+                            ? 'Tipo B: 5 rodillos negros (enteros) + 3 rodillos rojos y 1 esfera (4 “decimales”). Vista final: 00000,0646.'
                             : 'Tipo A: 5 dígitos enteros y 4 esferas decimales.',
                         style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 13, height: 1.35),
                       ),
                       const SizedBox(height: 16),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: TextField(
@@ -358,9 +393,10 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                                 FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
                               ],
                               maxLength: _layout.integerDigits,
-                              decoration: InputDecoration(
-                                labelText: _isLayoutB ? 'Enteros (8)' : 'Enteros (5)',
+                              decoration: const InputDecoration(
+                                labelText: 'Enteros (5)',
                                 counterText: '',
+                                isDense: true,
                               ),
                               style: const TextStyle(
                                 fontSize: 22,
@@ -380,10 +416,10 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                                 FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
                               ],
                               maxLength: _layout.fractionalDigits,
-                              decoration: InputDecoration(
-                                labelText: _isLayoutB ? 'Esfera (1 dígito)' : 'Esferas / decimales (4)',
-                                helperText: _isLayoutB ? 'Lectura del puntero rojo' : null,
+                              decoration: const InputDecoration(
+                                labelText: 'Decimales (4)',
                                 counterText: '',
+                                isDense: true,
                               ),
                               style: TextStyle(
                                 fontSize: 22,
@@ -396,6 +432,17 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                           ),
                         ],
                       ),
+                      if (_isLayoutB) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Decimales: 3 rodillos rojos en barra + 1 esfera (si no se ve, use X en ese dígito).',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 12,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       if (displayLine.isNotEmpty)
                         Align(

@@ -1,4 +1,4 @@
-import 'models/meter_reading_layout.dart';
+import 'models/meter_reading_layout.dart' show normalizeMeterReadingLayout;
 
 /// Cantidad de dígitos enteros y decimales según el tipo de cara del medidor.
 class MeterDigitLayout {
@@ -11,9 +11,8 @@ class MeterDigitLayout {
 }
 
 MeterDigitLayout meterDigitLayoutFor(String layout) {
-  if (layout == meterLayoutB) {
-    return const MeterDigitLayout(integerDigits: 8, fractionalDigits: 1);
-  }
+  // Tipo A y B: misma estructura lógica 5+4. A/B distingue solo la lectura física (OCR / UI de ayuda).
+  normalizeMeterReadingLayout(layout);
   return const MeterDigitLayout(integerDigits: 5, fractionalDigits: 4);
 }
 
@@ -25,7 +24,7 @@ String sanitizeMeterDigits(String raw, {required int maxLen}) {
   return cleaned.substring(0, maxLen);
 }
 
-/// Formato visual con coma: tipo A → 5+4; tipo B → 8 enteros + 1 esfera (9 dígitos).
+/// Formato visual con coma: tipo A y B → 5+4 (9 dígitos en total, misma posición de la coma lógica).
 String formatMeterDigitsForDisplay(String digitsOnly, String layout) {
   final ml = meterDigitLayoutFor(layout);
   final d = sanitizeMeterDigits(digitsOnly, maxLen: ml.totalDigits);
