@@ -223,22 +223,16 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         actions: [
           ElevatedButton(
             onPressed: () {
+              ref.invalidate(recentMeasurementsProvider);
+              ref.read(authServiceProvider).refreshProfile();
               Navigator.of(ctx).pop();
               Navigator.of(context).popUntil((route) => route.isFirst);
-              _refreshHomeDataInBackground();
             },
             child: const Text('Volver al Inicio'),
           ),
         ],
       ),
     );
-  }
-
-  void _refreshHomeDataInBackground() {
-    Future<void>(() async {
-      await ref.read(authServiceProvider).refreshProfile();
-      ref.invalidate(recentMeasurementsProvider);
-    });
   }
 
   @override

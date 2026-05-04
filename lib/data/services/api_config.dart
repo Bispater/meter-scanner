@@ -11,4 +11,5 @@ class ApiConfig {
   static const String meUrl = '$baseUrl/api/accounts/users/me/';
   static const String measurementsUrl = '$baseUrl/api/measurements/';
   static const String ocrUrl = '$baseUrl/api/measurements/ocr/';
+  static const String notificationsUrl = '$baseUrl/api/notifications/';
 }

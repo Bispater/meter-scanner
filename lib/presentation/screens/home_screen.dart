@@ -11,6 +11,7 @@ import '../../domain/models/meter_reading_layout.dart'
 import '../../domain/reading_value_codec.dart';
 import '../../domain/models/water_measurement.dart';
 import '../providers/app_providers.dart';
+import 'notifications_screen.dart';
 import 'qr_scanner_screen.dart';
 import 'prepare_measurement_screen.dart';
 import 'work_plan_screen.dart';
@@ -37,7 +38,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final auth = ref.read(authServiceProvider);
     await auth.refreshProfile();
     ref.invalidate(recentMeasurementsProvider);
+    ref.invalidate(notificationsProvider);
+    ref.invalidate(unreadNotificationsCountProvider);
     if (mounted) setState(() => _refreshing = false);
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+    );
+    if (!mounted) return;
+    ref.invalidate(unreadNotificationsCountProvider);
+    ref.invalidate(notificationsProvider);
   }
 
   Future<void> _logout() async {
@@ -102,6 +115,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ],
                 ),
                 actions: [
+                  _NotificationsBellAction(onTap: _openNotifications),
                   IconButton(
                     icon: const Icon(Icons.logout, color: Colors.white54),
                     tooltip: 'Cerrar sesión',
@@ -766,3 +780,48 @@ class _MeasurementTile extends StatelessWidget {
   }
 }
 
+class _NotificationsBellAction extends ConsumerWidget {
+  const _NotificationsBellAction({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadNotificationsCountProvider).maybeWhen(
+          data: (n) => n,
+          orElse: () => 0,
+        );
+    return IconButton(
+      onPressed: onTap,
+      tooltip: 'Notificaciones',
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.notifications_none_rounded, color: Colors.white54),
+          if (unread > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  unread > 99 ? '99+' : '$unread',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

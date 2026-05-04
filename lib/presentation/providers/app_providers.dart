@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/measurement_repository_impl.dart';
 import '../../data/services/auth_service.dart';
+import '../../data/services/notification_service.dart';
 import '../../data/services/ocr_service_impl.dart';
+import '../../domain/models/app_notification.dart';
 import '../../domain/models/qr_scan_data.dart';
 import '../../domain/models/water_measurement.dart';
 import '../../domain/repositories/measurement_repository.dart';
@@ -40,4 +42,20 @@ final submitMeasurementProvider =
     FutureProvider.family<bool, WaterMeasurement>((ref, measurement) async {
   final repository = ref.read(measurementRepositoryProvider);
   return repository.submitMeasurement(measurement);
+});
+
+// Notifications
+final notificationServiceProvider = Provider<NotificationService>((ref) {
+  final authService = ref.read(authServiceProvider);
+  return NotificationService(authService: authService);
+});
+
+final notificationsProvider = FutureProvider<List<AppNotification>>((ref) async {
+  final service = ref.read(notificationServiceProvider);
+  return service.fetchAll();
+});
+
+final unreadNotificationsCountProvider = FutureProvider<int>((ref) async {
+  final service = ref.read(notificationServiceProvider);
+  return service.unreadCount();
 });
