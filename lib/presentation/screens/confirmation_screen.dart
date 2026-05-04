@@ -35,6 +35,8 @@ class ConfirmationScreen extends ConsumerStatefulWidget {
 class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   final TextEditingController _wholePartController = TextEditingController();
   final TextEditingController _decimalPartController = TextEditingController();
+  final FocusNode _wholeFocus = FocusNode();
+  final FocusNode _decimalFocus = FocusNode();
   bool _isSubmitting = false;
   String? _croppedPath;
   bool _cropping = true;
@@ -68,6 +70,8 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   void dispose() {
     _wholePartController.dispose();
     _decimalPartController.dispose();
+    _wholeFocus.dispose();
+    _decimalFocus.dispose();
     if (_croppedPath != null) {
       try {
         File(_croppedPath!).delete();
@@ -91,6 +95,9 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         selection: TextSelection.collapsed(offset: sanitized.length),
       );
     }
+    if (sanitized.length >= maxL && _wholeFocus.hasFocus) {
+      FocusScope.of(context).requestFocus(_decimalFocus);
+    }
     setState(() {});
   }
 
@@ -103,58 +110,47 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
         selection: TextSelection.collapsed(offset: sanitized.length),
       );
     }
+    if (sanitized.length >= maxL && _decimalFocus.hasFocus) {
+      _decimalFocus.unfocus();
+    }
     setState(() {});
   }
 
   Future<void> _submitMeasurement() async {
     final combined = _combinedDigits();
-    final hasAny = combined.isNotEmpty;
     final complete = isCompleteReading(combined, widget.meterReadingLayout);
 
-    if (hasAny && !complete) {
+    if (!complete) {
       final need = _layout.totalDigits;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _isLayoutB
-                ? 'Complete los $need dígitos (5 enteros + 4 decimales: en tipo B, 5 negros + 3 rojos en barra + 1 esfera).'
-                : 'Complete los $need dígitos (5 enteros + 4 esferas).',
+                ? 'Lectura obligatoria: complete los $need dígitos (5 enteros + 4 decimales: 5 negros + 3 rojos en barra + 1 esfera).'
+                : 'Lectura obligatoria: complete los $need dígitos (5 enteros + 4 esferas).',
           ),
           backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 4),
         ),
       );
+      if (_wholePartController.text.length < _layout.integerDigits) {
+        FocusScope.of(context).requestFocus(_wholeFocus);
+      } else {
+        FocusScope.of(context).requestFocus(_decimalFocus);
+      }
       return;
-    }
-
-    if (!hasAny) {
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Enviar sin lectura escrita'),
-          content: const Text(
-            'La foto se enviará al servidor y la lectura se estimará allí con IA. '
-            'Podrá revisarla luego en el panel.',
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enviar')),
-          ],
-        ),
-      );
-      if (go != true || !mounted) return;
     }
 
     setState(() => _isSubmitting = true);
 
     try {
-      final manual = complete ? combined : '';
       final measurement = WaterMeasurement(
         meterId: widget.meterId,
         apartmentInfo: widget.apartmentInfo,
         apartmentId: widget.apartmentId,
-        value: manual,
+        value: combined,
         ocrValue: '',
-        modifiedByUser: manual.isNotEmpty,
+        modifiedByUser: true,
         photoPath: widget.photoPath,
         dateTime: DateTime.now(),
         readingLayout: widget.meterReadingLayout,
@@ -164,7 +160,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
       await repository.submitMeasurement(measurement);
 
       if (!mounted) return;
-      _showSuccessDialog(manual);
+      _showSuccessDialog(combined);
     } catch (e) {
       if (mounted) {
         final message = e.toString().replaceFirst('Exception: ', '');
@@ -191,9 +187,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   }
 
   void _showSuccessDialog(String manualDigits) {
-    final formatted = manualDigits.isEmpty
-        ? '— (pendiente de IA)'
-        : '${formatMeterDigitsForDisplay(manualDigits, widget.meterReadingLayout)} m³';
+    final formatted = '${formatMeterDigitsForDisplay(manualDigits, widget.meterReadingLayout)} m³';
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -212,9 +206,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              manualDigits.isEmpty
-                  ? 'La lectura se calculará en el servidor.'
-                  : 'Valor enviado: $formatted',
+              'Valor enviado: $formatted',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
               textAlign: TextAlign.center,
             ),
@@ -239,7 +231,9 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final previewPath = _croppedPath ?? widget.photoPath;
-    final displayLine = formatMeterDigitsForDisplay(_combinedDigits(), widget.meterReadingLayout);
+    final combined = _combinedDigits();
+    final displayLine = formatMeterDigitsForDisplay(combined, widget.meterReadingLayout);
+    final isComplete = isCompleteReading(combined, widget.meterReadingLayout);
 
     return Scaffold(
       appBar: AppBar(
@@ -263,6 +257,13 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Recapturar foto',
+            icon: const Icon(Icons.replay_rounded),
+            onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -275,7 +276,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
-                    height: 280,
+                    height: 220,
                     decoration: BoxDecoration(
                       color: Colors.black,
                       borderRadius: BorderRadius.circular(16),
@@ -324,30 +325,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _cropping ? null : () => _openPhotoViewer(previewPath),
-                      icon: const Icon(Icons.fullscreen, size: 18),
-                      label: const Text('Ver foto en grande'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.secondary,
-                        side: BorderSide(color: theme.colorScheme.secondary.withValues(alpha: 0.5)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  TextButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.replay_rounded, size: 18),
-                    label: const Text('Recapturar'),
-                    style: TextButton.styleFrom(foregroundColor: Colors.white54),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               Card(
                 child: Padding(
@@ -361,8 +339,25 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Lectura manual (opcional)',
+                              'Lectura manual',
                               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                            ),
+                            child: const Text(
+                              'Obligatoria',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                              ),
                             ),
                           ),
                         ],
@@ -381,19 +376,22 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                           Expanded(
                             child: TextField(
                               controller: _wholePartController,
+                              focusNode: _wholeFocus,
                               onChanged: _onWholeChanged,
                               keyboardType: TextInputType.text,
+                              textInputAction: TextInputAction.next,
+                              onSubmitted: (_) => FocusScope.of(context).requestFocus(_decimalFocus),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
                               ],
                               maxLength: _layout.integerDigits,
-                              decoration: const InputDecoration(
-                                labelText: 'Enteros (5)',
+                              decoration: InputDecoration(
+                                labelText: 'Enteros (${_layout.integerDigits})',
                                 counterText: '',
                                 isDense: true,
                               ),
                               style: const TextStyle(
-                                fontSize: 22,
+                                fontSize: 26,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 2,
                               ),
@@ -404,19 +402,22 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                           Expanded(
                             child: TextField(
                               controller: _decimalPartController,
+                              focusNode: _decimalFocus,
                               onChanged: _onDecimalChanged,
                               keyboardType: TextInputType.text,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => _decimalFocus.unfocus(),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(RegExp(r'[0-9Xx]')),
                               ],
                               maxLength: _layout.fractionalDigits,
-                              decoration: const InputDecoration(
-                                labelText: 'Decimales (4)',
+                              decoration: InputDecoration(
+                                labelText: 'Decimales (${_layout.fractionalDigits})',
                                 counterText: '',
                                 isDense: true,
                               ),
                               style: TextStyle(
-                                fontSize: 22,
+                                fontSize: 26,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 2,
                                 color: theme.colorScheme.secondary,
@@ -482,7 +483,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: _isSubmitting ? null : _submitMeasurement,
                 icon: _isSubmitting
@@ -491,9 +492,19 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen> {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
                       )
-                    : const Icon(Icons.cloud_upload_rounded, size: 24),
-                label: Text(_isSubmitting ? 'Enviando...' : 'Enviar medición'),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18)),
+                    : Icon(isComplete ? Icons.cloud_upload_rounded : Icons.lock_outline, size: 24),
+                label: Text(
+                  _isSubmitting
+                      ? 'Enviando...'
+                      : isComplete
+                          ? 'Enviar medición'
+                          : 'Complete la lectura para enviar',
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  backgroundColor: isComplete ? null : Colors.white12,
+                  foregroundColor: isComplete ? null : Colors.white54,
+                ),
               ),
               const SizedBox(height: 16),
             ],
